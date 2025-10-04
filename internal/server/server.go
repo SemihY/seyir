@@ -24,7 +24,7 @@ func StartWebServer(addr string) {
 		"ui",                                              // Current working directory
 		filepath.Join(filepath.Dir(execPath), "ui"),      // Next to executable
 		filepath.Join(filepath.Dir(execPath), "..", "ui"), // Development mode
-		"/usr/local/share/logspot/ui",                    // System-wide UI location
+		"/usr/local/share/logspot/ui",                    // System-wide UI location (installed)
 		filepath.Join(os.Getenv("HOME"), ".logspot", "ui"), // User's home directory
 	}
 	
