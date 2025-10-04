@@ -32,9 +32,15 @@ type ContainerLogCollector struct {
 }
 
 // NewDockerCollector creates a new Docker container discovery collector
-func NewDockerCollector(database *db.DB) *DockerCollector {
+// Each collector gets its own DuckDB connection to the shared lake
+func NewDockerCollector() *DockerCollector {
+	baseCollector := NewBaseCollector("docker-discovery")
+	if baseCollector == nil {
+		return nil
+	}
+	
 	return &DockerCollector{
-		BaseCollector:   NewBaseCollector(database, "docker-discovery"),
+		BaseCollector:   baseCollector,
 		knownContainers: make(map[string]*ContainerLogCollector),
 	}
 }
@@ -73,7 +79,7 @@ func (dc *DockerCollector) Start(ctx context.Context) error {
 func (dc *DockerCollector) Stop() error {
 	dc.RequestStop()
 	dc.stopAllContainers()
-	return nil
+	return dc.Close()
 }
 
 // Name returns the collector name
@@ -145,7 +151,11 @@ func (dc *DockerCollector) discoverContainers(ctx context.Context) {
 
 // startContainerCollection begins log collection for a specific container
 func (dc *DockerCollector) startContainerCollection(ctx context.Context, containerName string) {
-	collector := NewContainerLogCollector(dc.database, containerName)
+	collector := NewContainerLogCollector(containerName)
+	if collector == nil {
+		log.Printf("[ERROR] Failed to create container collector for %s", containerName)
+		return
+	}
 	
 	dc.mutex.Lock()
 	dc.knownContainers[containerName] = collector
@@ -177,9 +187,15 @@ func (dc *DockerCollector) stopAllContainers() {
 }
 
 // NewContainerLogCollector creates a collector for a specific container
-func NewContainerLogCollector(database *db.DB, containerName string) *ContainerLogCollector {
+// Each collector gets its own DuckDB connection to the shared lake
+func NewContainerLogCollector(containerName string) *ContainerLogCollector {
+	baseCollector := NewBaseCollector(containerName)
+	if baseCollector == nil {
+		return nil
+	}
+	
 	return &ContainerLogCollector{
-		BaseCollector: NewBaseCollector(database, containerName),
+		BaseCollector: baseCollector,
 		containerName: containerName,
 	}
 }
@@ -289,10 +305,10 @@ func (clc *ContainerLogCollector) Stop() error {
 	clc.RequestStop()
 	
 	if clc.cmd != nil && clc.cmd.Process != nil {
-		return clc.cmd.Process.Kill()
+		clc.cmd.Process.Kill()
 	}
 	
-	return nil
+	return clc.Close()
 }
 
 // Name returns the container name
@@ -307,13 +323,21 @@ func (clc *ContainerLogCollector) IsHealthy() bool {
 
 // Legacy functions for backward compatibility
 func StartDockerDiscovery(database *db.DB) {
-	collector := NewDockerCollector(database)
+	collector := NewDockerCollector()
+	if collector == nil {
+		log.Printf("[ERROR] Failed to create Docker collector")
+		return
+	}
 	ctx := context.Background()
 	collector.Start(ctx)
 }
 
 func CaptureDockerLogs(database *db.DB, containerName string) {
-	collector := NewContainerLogCollector(database, containerName)
+	collector := NewContainerLogCollector(containerName)
+	if collector == nil {
+		log.Printf("[ERROR] Failed to create container collector for %s", containerName)
+		return
+	}
 	ctx := context.Background()
 	collector.Start(ctx)
 }

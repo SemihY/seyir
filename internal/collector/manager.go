@@ -2,14 +2,13 @@ package collector
 
 import (
 	"context"
+	"fmt"
 	"log"
-	"logspot/internal/db"
 	"sync"
 )
 
 // Manager handles multiple log collectors
 type Manager struct {
-	database   *db.DB
 	collectors map[string]LogSource
 	mutex      sync.RWMutex
 	ctx        context.Context
@@ -17,11 +16,11 @@ type Manager struct {
 }
 
 // NewManager creates a new collector manager
-func NewManager(database *db.DB) *Manager {
+// Note: Lake directory should be set via db.SetGlobalLakeDir() before using this
+func NewManager() *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
 	
 	return &Manager{
-		database:   database,
 		collectors: make(map[string]LogSource),
 		ctx:        ctx,
 		cancel:     cancel,
@@ -66,6 +65,9 @@ func (m *Manager) removeCollector(name string) error {
 		if err := collector.Stop(); err != nil {
 			log.Printf("[ERROR] Error stopping collector %s: %v", name, err)
 		}
+		if err := collector.Close(); err != nil {
+			log.Printf("[ERROR] Error closing collector %s: %v", name, err)
+		}
 		delete(m.collectors, name)
 		log.Printf("[INFO] Removed collector: %s", name)
 	}
@@ -106,6 +108,9 @@ func (m *Manager) StopAll() error {
 	for name, collector := range m.collectors {
 		if err := collector.Stop(); err != nil {
 			log.Printf("[ERROR] Error stopping collector %s: %v", name, err)
+		}
+		if err := collector.Close(); err != nil {
+			log.Printf("[ERROR] Error closing collector %s: %v", name, err)
 		}
 	}
 	
@@ -153,13 +158,19 @@ func (m *Manager) EnableStdin(sourceName string) error {
 		sourceName = "stdin"
 	}
 	
-	collector := NewStdinCollector(m.database, sourceName)
+	collector := NewStdinCollector(sourceName)
+	if collector == nil {
+		return fmt.Errorf("failed to create stdin collector")
+	}
 	return m.AddCollector("stdin", collector)
 }
 
 // EnableDocker enables Docker container discovery and log collection
 func (m *Manager) EnableDocker() error {
-	collector := NewDockerCollector(m.database)
+	collector := NewDockerCollector()
+	if collector == nil {
+		return fmt.Errorf("failed to create docker collector")
+	}
 	return m.AddCollector("docker", collector)
 }
 

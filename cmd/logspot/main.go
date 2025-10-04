@@ -3,10 +3,11 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
 	"logspot/internal/collector"
 	"logspot/internal/db"
-	"logspot/internal/retention"
 	"logspot/internal/server"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -31,13 +32,30 @@ func getDataDir() string {
 var (
 	testMode     = flag.Bool("test", false, "Generate test logs")
 	forceCliMode = flag.Bool("cli", false, "Force CLI mode even on macOS")
+	daemonMode   = flag.Bool("daemon", false, "Run as daemon (web server)")
 )
 
 func main() {
 	flag.Parse()
-
+	
+	// Set up the lake directory where all session DBs will be stored
+	dataDir := getDataDir()
+	lakeDir := filepath.Join(dataDir, "lake")
+	db.SetGlobalLakeDir(lakeDir)
+	
 	if *testMode {
 		runTestMode()
+		return
+	}
+
+	if *daemonMode {
+		runDaemonMode()
+		return
+	}
+
+	// Check if this is a pipe operation (stdin has data)
+	if isPipeOperation() {
+		runPipeMode()
 		return
 	}
 
@@ -49,18 +67,105 @@ func main() {
 	}
 }
 
-func runCLIMode() {
-	dataDir := getDataDir()
-	dbPath := filepath.Join(dataDir, "logs.duckdb")
-	database := db.InitDB(dbPath)
+// isPipeOperation checks if stdin has piped data
+func isPipeOperation() bool {
+	stat, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	// Check if stdin is not a character device (i.e., it's piped data)
+	return (stat.Mode() & os.ModeCharDevice) == 0
+}
 
-	// Create collector manager
-	collectorManager := collector.NewManager(database)
+// runPipeMode handles a single pipe operation - creates session DB and exits
+func runPipeMode() {
+	log.Printf("[INFO] Running in pipe mode - creating session DB")
 	
-	// Enable stdin collector
+	// Start the daemon if not already running
+	ensureDaemonRunning()
+	
+	// Create collector manager for this session
+	collectorManager := collector.NewManager()
+	
+	// Enable stdin collector (creates its own session DB)
 	if err := collectorManager.EnableStdin("stdin"); err != nil {
 		fmt.Printf("Failed to enable stdin collector: %v\n", err)
+		os.Exit(1)
 	}
+
+	// Wait for stdin to close (pipe ends)
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGPIPE)
+	<-sigChan
+
+	// Stop collectors and exit
+	collectorManager.StopAll()
+	log.Printf("[INFO] Pipe operation completed")
+}
+
+// runDaemonMode runs as a persistent daemon with web server
+func runDaemonMode() {
+	log.Printf("[INFO] Running in daemon mode")
+	
+	// Start retention cleaner
+	go startRetentionCleaner()
+
+	// Start web server
+	go server.StartWebServer("localhost:7777")
+
+	// Keep daemon running
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	<-sigChan
+
+	log.Printf("[INFO] Daemon shutting down")
+}
+
+// ensureDaemonRunning starts the daemon if it's not already running
+func ensureDaemonRunning() {
+	if isServerRunning("localhost:7777") {
+		return // Daemon already running
+	}
+	
+	log.Printf("[INFO] Starting daemon...")
+	
+	// Start daemon as background process
+	execPath, err := os.Executable()
+	if err != nil {
+		log.Printf("[ERROR] Failed to get executable path: %v", err)
+		return
+	}
+	
+	cmd := exec.Command(execPath, "--daemon")
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	cmd.Stdin = nil
+	
+	if err := cmd.Start(); err != nil {
+		log.Printf("[ERROR] Failed to start daemon: %v", err)
+		return
+	}
+	
+	// Wait for daemon to be ready
+	for i := 0; i < 10; i++ {
+		time.Sleep(500 * time.Millisecond)
+		if isServerRunning("localhost:7777") {
+			log.Printf("[INFO] Daemon started successfully")
+			return
+		}
+	}
+	
+	log.Printf("[WARN] Daemon may not have started properly")
+}
+
+func runCLIMode() {
+	log.Printf("[INFO] Running in CLI mode")
+	
+	// Start the daemon if not already running
+	ensureDaemonRunning()
+	
+	// Create collector manager for this session
+	collectorManager := collector.NewManager()
 
 	// Enable Docker discovery if requested
 	if os.Getenv("ENABLE_DOCKER_CAPTURE") == "true" {
@@ -68,12 +173,6 @@ func runCLIMode() {
 			fmt.Printf("Failed to enable Docker collector: %v\n", err)
 		}
 	}
-
-	// Start retention cleaner
-	go retention.RetentionCleaner(database, 7)
-
-	// Start web server
-	go server.StartWebServer("localhost:7777")
 
 	// Auto-open browser if not disabled
 	if os.Getenv("DISABLE_AUTO_OPEN") != "true" {
@@ -93,26 +192,18 @@ func runCLIMode() {
 }
 
 func runMenuMode() {
-	dataDir := getDataDir()
-	dbPath := filepath.Join(dataDir, "logs.duckdb")
-	database := db.InitDB(dbPath)
-
-	// Create collector manager
-	collectorManager := collector.NewManager(database)
+	log.Printf("[INFO] Running in menu mode")
 	
-	// Enable stdin collector
-	collectorManager.EnableStdin("stdin")
+	// Start the daemon if not already running
+	ensureDaemonRunning()
+	
+	// Create collector manager for this session
+	collectorManager := collector.NewManager()
 
 	// Enable Docker discovery if requested
 	if os.Getenv("ENABLE_DOCKER_CAPTURE") == "true" {
 		collectorManager.EnableDocker()
 	}
-
-	// Start retention cleaner
-	go retention.RetentionCleaner(database, 7)
-
-	// Start web server
-	go server.StartWebServer("localhost:7777")
 
 	// macOS menubar uygulamasını başlat
 	systray.Run(onReady, func() {
@@ -120,11 +211,19 @@ func runMenuMode() {
 	})
 }
 
-func runTestMode() {
-	dataDir := getDataDir()
-	dbPath := filepath.Join(dataDir, "logs.duckdb")
-	database := db.InitDB(dbPath)
+func openBrowser(url string) {
+	var cmd string
+	var args []string
+	switch runtime.GOOS {
+	case "darwin": cmd = "open"
+	case "windows": cmd = "rundll32"; args = append(args,"url.dll,FileProtocolHandler")
+	default: cmd="xdg-open"
+	}
+	args = append(args,url)
+	exec.Command(cmd,args...).Start()
+}
 
+func runTestMode() {
 	fmt.Println("Generating test logs...")
 	
 	// Generate test logs
@@ -142,6 +241,14 @@ func runTestMode() {
 		"Scheduled task executed",
 		"Configuration reloaded",
 	}
+
+	// Create session connection for test logs
+	database, err := db.NewSessionConnection()
+	if err != nil {
+		log.Printf("[ERROR] Failed to create session connection for test logs: %v", err)
+		return
+	}
+	defer database.Close()
 
 	// Generate initial test logs
 	for i := 0; i < 25; i++ {
@@ -185,18 +292,6 @@ func runTestMode() {
 	<-sigChan
 }
 
-func openBrowser(url string) {
-	var cmd string
-	var args []string
-	switch runtime.GOOS {
-	case "darwin": cmd = "open"
-	case "windows": cmd = "rundll32"; args = append(args,"url.dll,FileProtocolHandler")
-	default: cmd="xdg-open"
-	}
-	args = append(args,url)
-	exec.Command(cmd,args...).Start()
-}
-
 func parseLogLevel(levelStr string) db.Level {
 	switch levelStr {
 	case "ERROR":
@@ -207,6 +302,57 @@ func parseLogLevel(levelStr string) db.Level {
 		return db.DEBUG
 	default:
 		return db.INFO
+	}
+}
+
+// isServerRunning checks if a server is already running on the given address
+func isServerRunning(addr string) bool {
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
+}
+
+// startRetentionCleaner runs retention cleanup across all session databases
+func startRetentionCleaner() {
+	for {
+		time.Sleep(24 * time.Hour) // Run once per day
+		
+		lakeDir := db.GetGlobalLakeDir()
+		if lakeDir == "" {
+			log.Printf("[WARN] Lake directory not set, skipping retention cleanup")
+			continue
+		}
+		
+		// Find all session databases
+		sessionFiles, err := filepath.Glob(filepath.Join(lakeDir, "logs_session_*.duckdb"))
+		if err != nil {
+			log.Printf("[ERROR] Failed to find session databases for retention: %v", err)
+			continue
+		}
+		
+		// Clean up each session database
+		for _, sessionFile := range sessionFiles {
+			func(dbPath string) {
+				database := db.InitDB(dbPath)
+				if database == nil {
+					log.Printf("[ERROR] Failed to open %s for retention", dbPath)
+					return
+				}
+				defer database.Close()
+				
+				// Delete logs older than 7 days
+				cutoff := time.Now().AddDate(0, 0, -7)
+				_, err = database.Exec(`DELETE FROM logs WHERE ts < ?`, cutoff)
+				if err != nil {
+					log.Printf("[ERROR] Retention cleanup failed for %s: %v", dbPath, err)
+				} else {
+					log.Printf("[INFO] Retention cleanup completed for %s", dbPath)
+				}
+			}(sessionFile)
+		}
 	}
 }
 
@@ -239,9 +385,13 @@ func onReady() {
 
 func generateTestLogs() {
 	go func() {
-		dataDir := getDataDir()
-		dbPath := filepath.Join(dataDir, "logs.duckdb")
-		database := db.InitDB(dbPath)
+		// Create session connection for test logs
+		database, err := db.NewSessionConnection()
+		if err != nil {
+			log.Printf("[ERROR] Failed to create session connection for test logs: %v", err)
+			return
+		}
+		defer database.Close()
 		
 		sources := []string{"menubar-test", "sample-app", "test-service"}
 		levels := []string{"INFO", "WARN", "ERROR"}

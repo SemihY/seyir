@@ -16,13 +16,19 @@ type StdinCollector struct {
 }
 
 // NewStdinCollector creates a new stdin log collector
-func NewStdinCollector(database *db.DB, sourceName string) *StdinCollector {
+// Each collector gets its own DuckDB connection to the shared lake
+func NewStdinCollector(sourceName string) *StdinCollector {
 	if sourceName == "" {
 		sourceName = "stdin"
 	}
 	
+	baseCollector := NewBaseCollector(sourceName)
+	if baseCollector == nil {
+		return nil
+	}
+	
 	return &StdinCollector{
-		BaseCollector: NewBaseCollector(database, sourceName),
+		BaseCollector: baseCollector,
 	}
 }
 
@@ -88,7 +94,7 @@ func (sc *StdinCollector) Start(ctx context.Context) error {
 // Stop gracefully stops the stdin collector
 func (sc *StdinCollector) Stop() error {
 	sc.RequestStop()
-	return nil
+	return sc.Close()
 }
 
 // Name returns the collector name
@@ -103,7 +109,11 @@ func (sc *StdinCollector) IsHealthy() bool {
 
 // Legacy function for backward compatibility
 func CaptureStdin(database *db.DB, source string) {
-	collector := NewStdinCollector(database, source)
+	collector := NewStdinCollector(source)
+	if collector == nil {
+		log.Printf("[ERROR] Failed to create stdin collector for %s", source)
+		return
+	}
 	ctx := context.Background()
 	collector.Start(ctx)
 }

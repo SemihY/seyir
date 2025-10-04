@@ -2,6 +2,7 @@ package collector
 
 import (
 	"context"
+	"log"
 	"logspot/internal/db"
 	"logspot/internal/tail"
 	"strings"
@@ -14,6 +15,9 @@ type LogSource interface {
 	
 	// Stop gracefully stops log collection
 	Stop() error
+	
+	// Close closes any resources (like database connections)
+	Close() error
 	
 	// Name returns a human-readable name for this source
 	Name() string
@@ -31,7 +35,15 @@ type BaseCollector struct {
 }
 
 // NewBaseCollector creates a new base collector
-func NewBaseCollector(database *db.DB, sourceName string) *BaseCollector {
+// Each collector gets its own DuckDB session file (e.g., logs_session_123.duckdb)
+func NewBaseCollector(sourceName string) *BaseCollector {
+	// Create a new DuckDB session for this collector
+	database, err := db.NewSessionConnection()
+	if err != nil {
+		log.Printf("[ERROR] Failed to create session connection for %s: %v", sourceName, err)
+		return nil
+	}
+	
 	return &BaseCollector{
 		database:   database,
 		sourceName: sourceName,
@@ -81,6 +93,14 @@ func (bc *BaseCollector) StopChan() <-chan struct{} {
 func (bc *BaseCollector) RequestStop() {
 	close(bc.stopChan)
 	bc.isRunning = false
+}
+
+// Close closes the database connection
+func (bc *BaseCollector) Close() error {
+	if bc.database != nil {
+		return bc.database.Close()
+	}
+	return nil
 }
 
 // containsIgnoreCase checks if any of the patterns exist in the text (case insensitive)
