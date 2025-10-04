@@ -79,11 +79,17 @@ func NewSessionConnection() (*DB, error) {
 	// Initialize database wrapper
 	dbWrapper := &DB{db}
 
+	// install DuckLake extension for federation (if supported)
+	_, err = dbWrapper.Exec(`INSTALL ducklake;`)
+	if err != nil {
+		log.Printf("[WARN] Failed to install ducklake extension: %v", err)
+	}
+
 	// Create shared metadata database for federation (no extensions needed)
-	metadataDBPath := filepath.Join(lakeDir, "metadata.duckdb")
+	metadataDBPath := filepath.Join(lakeDir, "logspot.ducklake")
 	
 	// Try to attach shared metadata database for federation
-	attachSQL := fmt.Sprintf("ATTACH '%s' AS metadata;", metadataDBPath)
+	attachSQL := fmt.Sprintf("ATTACH 'ducklake:%s' AS logspot;", metadataDBPath)
 	if _, err := dbWrapper.Exec(attachSQL); err != nil {
 		log.Printf("[WARN] Failed to attach metadata database: %v", err)
 		// Continue without federation - each session will be independent
@@ -92,7 +98,7 @@ func NewSessionConnection() (*DB, error) {
 		
 		// Ensure metadata tables exist (compatible with DuckDB v1.3.0)
 		_, err := dbWrapper.Exec(`
-			CREATE TABLE IF NOT EXISTS metadata.session_registry (
+			CREATE TABLE IF NOT EXISTS logspot.session_registry (
 				session_id TEXT NOT NULL,
 				db_path TEXT NOT NULL,
 				created_at TIMESTAMP NOT NULL,
@@ -105,7 +111,7 @@ func NewSessionConnection() (*DB, error) {
 			// Register this session
 			now := time.Now()
 			_, err = dbWrapper.Exec(`
-				INSERT INTO metadata.session_registry (session_id, db_path, created_at, last_active) 
+				INSERT INTO logspot.session_registry (session_id, db_path, created_at, last_active) 
 				VALUES (?, ?, ?, ?)
 			`, sessionID, sessionDBPath, now, now)
 			if err != nil {
@@ -156,7 +162,7 @@ func InitDB(path string) *DB {
 func (db *DB) EnsureSchema() error {
 	// Create logs table compatible with DuckDB v1.3.0 (no DEFAULT CURRENT_TIMESTAMP or PRIMARY KEY)
 	_, err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS logs (
+		CREATE TABLE IF NOT EXISTS logspot.logs (
 			ts TIMESTAMP NOT NULL,
 			source TEXT NOT NULL,
 			level TEXT NOT NULL,
@@ -166,22 +172,6 @@ func (db *DB) EnsureSchema() error {
 	`)
 	if err != nil {
 		return err
-	}
-
-	// Create indexes for better query performance
-	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_logs_ts ON logs(ts)`)
-	if err != nil {
-		log.Printf("[WARN] Failed to create timestamp index: %v", err)
-	}
-
-	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_logs_source ON logs(source)`)
-	if err != nil {
-		log.Printf("[WARN] Failed to create source index: %v", err)
-	}
-
-	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_logs_level ON logs(level)`)
-	if err != nil {
-		log.Printf("[WARN] Failed to create level index: %v", err)
 	}
 
 	return nil
@@ -205,6 +195,67 @@ func (db *DB) HealthCheck() error {
 }
 
 func SaveLog(db *DB, e *LogEntry) {
-	_, err := db.Exec(`INSERT INTO logs VALUES (?, ?, ?, ?, ?)`, e.Ts, e.Source, e.Level, e.Message, e.ID)
+	_, err := db.Exec(`INSERT INTO logspot.logs VALUES (?, ?, ?, ?, ?)`, e.Ts, e.Source, e.Level, e.Message, e.ID)
 	if err != nil { log.Printf("[ERROR] failed to save log: %v", err) }
 }
+
+func SearchLogs(query string, limit int) ([]*LogEntry, error) {
+	lakeDirMutex.RLock()
+	lakeDir := globalLakeDir
+	lakeDirMutex.RUnlock()
+
+	if lakeDir == "" {
+		return nil, fmt.Errorf("global lake directory not set. Call SetGlobalLakeDir() first")
+	}
+
+	sessionDBPath := filepath.Join(lakeDir, "logs.duckdb")
+	db, err := sql.Open("duckdb", sessionDBPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open database %s: %v", sessionDBPath, err)
+	}
+	defer db.Close()
+
+	// install DuckLake extension for federation (if supported)
+	_, err = db.Exec(`INSTALL ducklake;`)
+	if err != nil {
+		log.Printf("[WARN] Failed to install ducklake extension: %v", err)
+	}
+
+	// attach DuckLake metadata if available
+	duckLakePath := filepath.Join(lakeDir, "logspot.ducklake")
+	attachSQL := fmt.Sprintf("ATTACH 'ducklake:%s' AS logspot;", duckLakePath)
+	if _, err := db.Exec(attachSQL); err != nil {
+		log.Printf("[WARN] Failed to attach DuckLake: %v", err)
+	} else {
+		if _, err := db.Exec("USE logspot;"); err != nil {
+			log.Printf("[WARN] Failed to use DuckLake database: %v", err)
+		}
+	}
+
+	// Perform search query
+	rows, err := db.Query(`
+		SELECT ts, source, level, message, id 
+		FROM logs 
+		WHERE message LIKE ? OR source LIKE ?
+		ORDER BY ts DESC 
+		LIMIT ?`, "%"+query+"%", "%"+query+"%", limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []*LogEntry
+	for rows.Next() {
+		var e LogEntry
+		if err := rows.Scan(&e.Ts, &e.Source, &e.Level, &e.Message, &e.ID); err != nil {
+			return nil, err
+		}
+		results = append(results, &e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return results, nil
+}
+

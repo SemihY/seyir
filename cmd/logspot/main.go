@@ -1,7 +1,6 @@
 package main
 
 import (
-	"database/sql"
 	"flag"
 	"fmt"
 	"log"
@@ -157,99 +156,23 @@ func runPipeMode() {
 func runSearchMode(query string, limit int) {
 	fmt.Printf("Searching for: %s (limit: %d)\n", query, limit)
 	
-	lakeDir := db.GetGlobalLakeDir()
-	if lakeDir == "" {
-		fmt.Println("Error: Lake directory not configured")
-		os.Exit(1)
-	}
-	
-	// Find all session databases
-	sessionFiles, err := filepath.Glob(filepath.Join(lakeDir, "logs_session_*.duckdb"))
+	// search with db.searchLogs
+	results, err := db.SearchLogs(query, limit)
 	if err != nil {
-		fmt.Printf("Error finding session databases: %v\n", err)
-		os.Exit(1)
+		fmt.Printf("Search failed: %v\n", err)
+		return
 	}
-	
-	if len(sessionFiles) == 0 {
-		fmt.Println("No session databases found in lake directory")
-		os.Exit(0)
-	}
-	
-	fmt.Printf("Found %d session database(s)\n", len(sessionFiles))
-	
-	// Create temporary DuckDB instance for federation
-	tempDB, err := sql.Open("duckdb", ":memory:")
-	if err != nil {
-		fmt.Printf("Error creating temporary database: %v\n", err)
-		os.Exit(1)
-	}
-	defer tempDB.Close()
-	
-	// Attach all session databases for federated queries
-	
-	// Fallback: Attach all session databases individually
-	var unionParts []string
-	for i, sessionFile := range sessionFiles {
-		dbAlias := fmt.Sprintf("session_%d", i)
-		attachSQL := fmt.Sprintf("ATTACH '%s' AS %s", sessionFile, dbAlias)
-		if _, err := tempDB.Exec(attachSQL); err != nil {
-			fmt.Printf("Warning: Failed to attach %s: %v\n", sessionFile, err)
-			continue
-		}
-		unionParts = append(unionParts, fmt.Sprintf("SELECT * FROM %s.logs", dbAlias))
-		fmt.Printf("Attached: %s\n", filepath.Base(sessionFile))
-	}
-	
-	if len(unionParts) == 0 {
-		fmt.Println("No databases could be attached for querying")
-		os.Exit(1)
-	}
-	
-	// Build and execute federated query
-	federatedQuery := strings.Join(unionParts, " UNION ALL ")
-	if query != "" {
-		federatedQuery = fmt.Sprintf("SELECT * FROM (%s) WHERE message LIKE '%%%s%%' OR source LIKE '%%%s%%'", 
-			federatedQuery, query, query)
-	}
-	federatedQuery = fmt.Sprintf("SELECT * FROM (%s) ORDER BY ts DESC LIMIT %d", federatedQuery, limit)
-	
-	fmt.Printf("\nExecuting search...\n")
-	rows, err := tempDB.Query(federatedQuery)
-	if err != nil {
-		fmt.Printf("Query failed: %v\n", err)
-		os.Exit(1)
-	}
-	defer rows.Close()
 	
 	// Display results
 	fmt.Printf("\nResults:\n")
 	fmt.Printf("%-20s %-15s %-8s %s\n", "TIMESTAMP", "SOURCE", "LEVEL", "MESSAGE")
 	fmt.Printf("%s\n", strings.Repeat("-", 80))
-	
+
 	count := 0
-	for rows.Next() {
-		var timestamp time.Time
-		var source, level, message, id string
-		if err := rows.Scan(&timestamp, &source, &level, &message, &id); err != nil {
-			fmt.Printf("Error scanning row: %v\n", err)
-			continue
-		}
-		
-		// Format timestamp to show only time if today, otherwise show date
-		timeStr := timestamp.Format("15:04:05")
-		if !isToday(timestamp) {
-			timeStr = timestamp.Format("2006-01-02 15:04")
-		}
-		
-		// Truncate message if too long
-		if len(message) > 50 {
-			message = message[:47] + "..."
-		}
-		
-		fmt.Printf("%-20s %-15s %-8s %s\n", timeStr, source, level, message)
+	for _, entry := range results {
+		fmt.Printf("%-20s %-15s %-8s %s\n", entry.Ts, entry.Source, entry.Level, entry.Message)
 		count++
 	}
-	
 	fmt.Printf("\nFound %d matching log entries\n", count)
 }
 
