@@ -7,9 +7,7 @@ import (
 	"log"
 	"logspot/internal/collector"
 	"logspot/internal/db"
-	"net"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -116,9 +114,6 @@ func isPipeOperation() bool {
 func runPipeMode() {
 	log.Printf("[INFO] Running in pipe mode - creating session DB")
 	
-	// Start the daemon if not already running
-	ensureDaemonRunning()
-	
 	// Create collector manager for this session
 	collectorManager := collector.NewManager()
 	
@@ -156,43 +151,6 @@ func runPipeMode() {
 	// Stop collectors and exit
 	collectorManager.StopAll()
 	log.Printf("[INFO] Pipe operation completed")
-}
-
-// ensureDaemonRunning starts the daemon if it's not already running
-func ensureDaemonRunning() {
-	if isServerRunning("localhost:7777") {
-		return // Daemon already running
-	}
-	
-	log.Printf("[INFO] Starting daemon...")
-	
-	// Start daemon as background process
-	execPath, err := os.Executable()
-	if err != nil {
-		log.Printf("[ERROR] Failed to get executable path: %v", err)
-		return
-	}
-	
-	cmd := exec.Command(execPath, "--daemon")
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-	cmd.Stdin = nil
-	
-	if err := cmd.Start(); err != nil {
-		log.Printf("[ERROR] Failed to start daemon: %v", err)
-		return
-	}
-	
-	// Wait for daemon to be ready
-	for i := 0; i < 10; i++ {
-		time.Sleep(500 * time.Millisecond)
-		if isServerRunning("localhost:7777") {
-			log.Printf("[INFO] Daemon started successfully")
-			return
-		}
-	}
-	
-	log.Printf("[WARN] Daemon may not have started properly")
 }
 
 // runSearchMode searches across all session databases and outputs results
@@ -300,15 +258,4 @@ func isToday(t time.Time) bool {
 	now := time.Now()
 	return t.Year() == now.Year() && t.Month() == now.Month() && t.Day() == now.Day()
 }
-
-// isServerRunning checks if a server is already running on the given address
-func isServerRunning(addr string) bool {
-	conn, err := net.Dial("tcp", addr)
-	if err != nil {
-		return false
-	}
-	conn.Close()
-	return true
-}
-
 
