@@ -25,11 +25,13 @@ var (
 // DB wraps sql.DB to provide a type in the core package
 type DB struct {
 	*sql.DB
-	sessionID    string    // Session ID for this pipe operation
-	parquetPath  string    // Path to the Parquet file for this session
-	createdAt    time.Time // When this session was created
-	lastActivity time.Time // Last time this session was used
-	processInfo  string    // Information about the process using this session
+	sessionID      string    // Session ID for this pipe operation
+	parquetPath    string    // Path to the Parquet file for this session
+	createdAt      time.Time // When this session was created
+	lastActivity   time.Time // Last time this session was used
+	processInfo    string    // Information about the process using this session
+	pendingEntries int       // Number of entries waiting to be flushed
+	lastFlush      time.Time // Last time data was flushed to Parquet
 }
 
 // SetGlobalLakeDir sets the global lake directory where all session DBs are stored
@@ -98,12 +100,14 @@ func NewSessionConnection() (*DB, error) {
 	// Initialize database wrapper with session info
 	now := time.Now()
 	dbWrapper := &DB{
-		DB:           db,
-		sessionID:    sessionID,
-		parquetPath:  filepath.Join(lakeDir, fmt.Sprintf("logs_%s.parquet", sessionID)),
-		createdAt:    now,
-		lastActivity: now,
-		processInfo:  processInfo,
+		DB:             db,
+		sessionID:      sessionID,
+		parquetPath:    filepath.Join(lakeDir, fmt.Sprintf("session_%s.parquet", sessionID)),
+		createdAt:      now,
+		lastActivity:   now,
+		processInfo:    processInfo,
+		pendingEntries: 0,
+		lastFlush:      now,
 	}
 
 	// Create temporary table for this session
@@ -211,7 +215,7 @@ func SaveLog(db *DB, e *LogEntry) {
 	}
 }
 
-// SaveLogDirectly saves a log entry directly to a Parquet file
+// SaveLogDirectly saves a log entry, batching writes for efficiency
 func (db *DB) SaveLogDirectly(e *LogEntry) error {
 	if db.sessionID == "" {
 		return fmt.Errorf("no session ID set for this database")
@@ -220,52 +224,101 @@ func (db *DB) SaveLogDirectly(e *LogEntry) error {
 	// Update last activity time
 	db.lastActivity = time.Now()
 	
-	// Get the lake directory
-	lakeDir := GetGlobalLakeDir()
-	if lakeDir == "" {
-		return fmt.Errorf("global lake directory not set")
-	}
-	
-	// Create a unique filename for this log entry (timestamp-based for ordering)
-	timestamp := time.Now().UnixNano()
-	parquetFile := filepath.Join(lakeDir, fmt.Sprintf("logs_%s_%d.parquet", db.sessionID, timestamp))
-	
-	// Create a temporary table with just this entry
-	tempTableName := fmt.Sprintf("temp_%d", timestamp)
-	
-	// Create temp table with the same structure as logs
-	_, err := db.Exec(fmt.Sprintf(`
-		CREATE TABLE %s (
-			ts TIMESTAMP NOT NULL,
-			source TEXT NOT NULL,
-			level TEXT NOT NULL,
-			message TEXT NOT NULL,
-			id TEXT NOT NULL
-		)`, tempTableName))
+	// Insert into in-memory table first
+	_, err := db.Exec(`INSERT INTO logs VALUES (?, ?, ?, ?, ?)`, e.Ts, e.Source, e.Level, e.Message, e.ID)
 	if err != nil {
-		return fmt.Errorf("failed to create temp table: %v", err)
+		return fmt.Errorf("failed to insert into memory table: %v", err)
 	}
 	
-	// Insert the entry into temp table
-	_, err = db.Exec(fmt.Sprintf("INSERT INTO %s VALUES (?, ?, ?, ?, ?)", tempTableName), 
-		e.Ts, e.Source, e.Level, e.Message, e.ID)
+	db.pendingEntries++
+	
+	// Flush conditions: 
+	// Since DuckDB APPEND mode has issues, we use larger batches and final flush
+	// 1. Every 50 entries for reasonable memory usage
+	// 2. Every 10 seconds to prevent data loss for long-running processes
+	shouldFlush := db.pendingEntries >= 50 || 
+		time.Since(db.lastFlush) >= 10*time.Second
+	
+	if shouldFlush {
+		return db.flushToParquet()
+	}
+	
+	return nil
+}
+
+// flushToParquet writes all pending entries to the Parquet file
+func (db *DB) flushToParquet() error {
+	if db.pendingEntries == 0 {
+		return nil // Nothing to flush
+	}
+	
+	// Check how many entries we're about to flush
+	var count int
+	err := db.QueryRow("SELECT COUNT(*) FROM logs").Scan(&count)
 	if err != nil {
-		return fmt.Errorf("failed to insert into temp table: %v", err)
+		return fmt.Errorf("failed to count logs before flush: %v", err)
 	}
 	
-	// Export temp table to its own Parquet file
-	exportSQL := fmt.Sprintf("COPY %s TO '%s' (FORMAT PARQUET)", tempTableName, parquetFile)
+	if count == 0 {
+		db.pendingEntries = 0
+		return nil // Nothing to flush
+	}
+	
+	// Check if the Parquet file exists
+	fileExists := false
+	if _, err := os.Stat(db.parquetPath); err == nil {
+		fileExists = true
+	}
+	
+	// Export to compressed Parquet
+	var exportSQL string
+	if fileExists {
+		// Since APPEND mode has issues, implement manual append by reading existing data
+		// First, read existing data into a temporary table
+		_, err = db.Exec("CREATE TEMPORARY TABLE existing_logs AS SELECT * FROM read_parquet(?)", db.parquetPath)
+		if err != nil {
+			return fmt.Errorf("failed to read existing parquet data: %v", err)
+		}
+		
+		// Insert existing data into our logs table (before new data)
+		_, err = db.Exec("INSERT INTO logs SELECT * FROM existing_logs")
+		if err != nil {
+			return fmt.Errorf("failed to merge existing data: %v", err)
+		}
+		
+		// Drop temporary table
+		db.Exec("DROP TABLE existing_logs")
+		
+		// Update count to reflect total entries
+		err = db.QueryRow("SELECT COUNT(*) FROM logs").Scan(&count)
+		if err != nil {
+			return fmt.Errorf("failed to count merged logs: %v", err)
+		}
+		
+		log.Printf("[DEBUG] Merged with existing data, total entries: %d", count)
+	}
+	
+	// Write all data (existing + new) with compression
+	exportSQL = fmt.Sprintf("COPY logs TO '%s' (FORMAT PARQUET, COMPRESSION 'SNAPPY')", db.parquetPath)
+	
+	log.Printf("[DEBUG] Flushing %d entries to %s (file exists: %t)", count, filepath.Base(db.parquetPath), fileExists)
+	
 	_, err = db.Exec(exportSQL)
 	if err != nil {
-		return fmt.Errorf("failed to export to parquet file %s: %v", parquetFile, err)
+		return fmt.Errorf("failed to write to parquet file %s: %v", db.parquetPath, err)
 	}
 	
-	// Clean up temp table
-	_, err = db.Exec(fmt.Sprintf("DROP TABLE %s", tempTableName))
+	// Clear the in-memory table after successful write
+	_, err = db.Exec("DELETE FROM logs")
 	if err != nil {
-		log.Printf("[WARN] Failed to drop temp table: %v", err)
+		log.Printf("[WARN] Failed to clear memory table: %v", err)
 	}
 	
+	// Update flush tracking
+	db.pendingEntries = 0
+	db.lastFlush = time.Now()
+	
+	log.Printf("[DEBUG] Successfully flushed %d entries to %s", count, filepath.Base(db.parquetPath))
 	return nil
 }
 
@@ -321,8 +374,8 @@ func SearchLogs(query string, limit int) ([]*LogEntry, error) {
 	}
 	defer db.Close()
 
-	// Find all Parquet files in the lake directory (including timestamped files)
-	parquetPattern := filepath.Join(lakeDir, "logs_*.parquet")
+	// Find all session Parquet files in the lake directory
+	parquetPattern := filepath.Join(lakeDir, "session_*.parquet")
 	
 	// Create a query that reads from all Parquet files using glob pattern
 	baseSQL := fmt.Sprintf(`
@@ -419,6 +472,19 @@ func CleanupInactiveSessions(maxInactiveTime time.Duration) int {
 
 // CloseSession closes a specific session and removes it from tracking
 func (db *DB) CloseSession() error {
+	// Always flush any remaining data before closing, even if pendingEntries is wrong
+	// Check if there's actually data in the memory table
+	var count int
+	err := db.QueryRow("SELECT COUNT(*) FROM logs").Scan(&count)
+	if err != nil {
+		log.Printf("[WARN] Failed to check remaining entries on close: %v", err)
+	} else if count > 0 {
+		log.Printf("[INFO] Flushing %d remaining entries on session close", count)
+		if err := db.flushToParquet(); err != nil {
+			log.Printf("[ERROR] Failed to flush remaining data on close: %v", err)
+		}
+	}
+	
 	if db.sessionID != "" {
 		sessionsMutex.Lock()
 		delete(activeSessions, db.sessionID)

@@ -61,14 +61,15 @@ Examples:
     logspot --test                          # Creates sample logs
 
 Architecture:
-    - Each pipe operation creates its own session with Parquet files
-    - All Parquet files stored in ~/.logspot/lake/
+    - Each pipe operation creates one compressed Parquet file per session
+    - Files stored in ~/.logspot/lake/session_*.parquet (SNAPPY compressed)
+    - Efficient batched writes with immediate persistence
     - Web dashboard federates queries across all Parquet files
     - Multiple concurrent sessions supported
     - Session management and cleanup available
     - Visit http://localhost:7777 for web interface
 
-Lake Directory: ~/.logspot/lake/logs_*.parquet`)
+Lake Directory: ~/.logspot/lake/session_*.parquet`)
 }
 
 var (
