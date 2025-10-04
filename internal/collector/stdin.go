@@ -3,6 +3,7 @@ package collector
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"log"
 	"logspot/internal/db"
 	"os"
@@ -70,6 +71,8 @@ func (sc *StdinCollector) Start(ctx context.Context) error {
 					if err := scanner.Err(); err != nil {
 						log.Printf("Error reading stdin: %v", err)
 					}
+					// EOF reached - pipe is closed
+					log.Printf("EOF reached on stdin, finishing collection")
 					return
 				}
 				
@@ -77,6 +80,9 @@ func (sc *StdinCollector) Start(ctx context.Context) error {
 				if line == "" {
 					continue
 				}
+				
+				// Output the line to stdout (passthrough)
+				fmt.Println(line)
 				
 				// Parse log level from message
 				level := sc.ParseLogLevel(line)

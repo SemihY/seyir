@@ -53,8 +53,12 @@ func NewBaseCollector(sourceName string) *BaseCollector {
 
 // SaveAndBroadcast saves a log entry and broadcasts it to connected clients
 func (bc *BaseCollector) SaveAndBroadcast(entry *db.LogEntry) {
-	// Save to database
-	db.SaveLog(bc.database, entry)
+	// Save directly to Parquet for immediate persistence
+	if err := bc.database.SaveLogDirectly(entry); err != nil {
+		log.Printf("[ERROR] Failed to save log to Parquet: %v", err)
+		// Fallback: save to memory table
+		db.SaveLog(bc.database, entry)
+	}
 	
 	// Broadcast to live viewers
 	tail.BroadcastLog(entry)
@@ -95,10 +99,10 @@ func (bc *BaseCollector) RequestStop() {
 	bc.isRunning = false
 }
 
-// Close closes the database connection
+// Close closes the database connection and cleans up the session
 func (bc *BaseCollector) Close() error {
 	if bc.database != nil {
-		return bc.database.Close()
+		return bc.database.CloseSession()
 	}
 	return nil
 }

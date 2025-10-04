@@ -32,8 +32,10 @@ func showUsage() {
 
 Usage:
     logspot [flags]                          # Interactive mode
-    command | logspot                        # Pipe mode (creates session DB)
+    command | logspot                        # Pipe mode (creates session)
     logspot --search "query"                 # Search mode
+    logspot --sessions                       # Show active sessions
+    logspot --cleanup                        # Cleanup inactive sessions
     logspot --daemon                         # Daemon mode (web server)
     logspot --test                           # Generate test logs
 
@@ -59,19 +61,23 @@ Examples:
     logspot --test                          # Creates sample logs
 
 Architecture:
-    - Each pipe operation creates its own DuckDB session file
-    - All session files stored in ~/.logspot/lake/
-    - Web dashboard federates queries across all sessions
+    - Each pipe operation creates its own session with Parquet files
+    - All Parquet files stored in ~/.logspot/lake/
+    - Web dashboard federates queries across all Parquet files
+    - Multiple concurrent sessions supported
+    - Session management and cleanup available
     - Visit http://localhost:7777 for web interface
 
-Lake Directory: ~/.logspot/lake/logs_session_*.duckdb`)
+Lake Directory: ~/.logspot/lake/logs_*.parquet`)
 }
 
 var (
-	forceCliMode = flag.Bool("cli", false, "Force CLI mode even on macOS")
-	searchQuery  = flag.String("search", "", "Search logs in the database (use '*' for all logs)")
-	searchLimit  = flag.Int("limit", 100, "Limit number of search results")
-	showHelp     = flag.Bool("help", false, "Show usage information")
+	forceCliMode   = flag.Bool("cli", false, "Force CLI mode even on macOS")
+	searchQuery    = flag.String("search", "", "Search logs in the database (use '*' for all logs)")
+	searchLimit    = flag.Int("limit", 100, "Limit number of search results")
+	showHelp       = flag.Bool("help", false, "Show usage information")
+	showSessions   = flag.Bool("sessions", false, "Show active sessions")
+	cleanupSessions = flag.Bool("cleanup", false, "Cleanup inactive sessions")
 )
 
 func main() {
@@ -84,6 +90,16 @@ func main() {
 	
 	if *showHelp {
 		showUsage()
+		return
+	}
+
+	if *showSessions {
+		runShowSessions()
+		return
+	}
+
+	if *cleanupSessions {
+		runCleanupSessions()
 		return
 	}
 
@@ -112,40 +128,44 @@ func isPipeOperation() bool {
 // runPipeMode handles a single pipe operation - creates session DB and exits
 func runPipeMode() {
 	log.Printf("[INFO] Running in pipe mode - creating session DB")
-	
-	// Create collector manager for this session
+
 	collectorManager := collector.NewManager()
-	
+
 	// Enable stdin collector (creates its own session DB)
 	if err := collectorManager.EnableStdin("stdin"); err != nil {
 		fmt.Printf("Failed to enable stdin collector: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Set up signal handling for manual interruption
+	// Handle signals for graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGPIPE)
-	
-	// Wait for either stdin to close or manual interruption
+
+	// Wait for the collector to finish naturally or for a signal
+	done := make(chan bool, 1)
 	go func() {
-		// Poll the stdin collector until it's no longer running
+		// Monitor the stdin collector until it's no longer healthy (finished)
 		for {
 			time.Sleep(100 * time.Millisecond)
-			if stdinCollector, exists := collectorManager.GetCollector("stdin"); exists {
-				if !stdinCollector.IsHealthy() {
-					// Stdin collector finished, signal completion
-					sigChan <- syscall.SIGPIPE
-					return
-				}
-			} else {
-				// Collector was removed, exit
-				sigChan <- syscall.SIGPIPE
+			stdinCollector, exists := collectorManager.GetCollector("stdin")
+			if !exists {
+				done <- true
+				return
+			}
+			if !stdinCollector.IsHealthy() {
+				done <- true
 				return
 			}
 		}
 	}()
-	
-	<-sigChan
+
+	// Wait for either completion or signal
+	select {
+	case <-sigChan:
+		log.Printf("[INFO] Received signal, shutting down")
+	case <-done:
+		log.Printf("[INFO] Stdin collection completed")
+	}
 
 	// Stop collectors and exit
 	collectorManager.StopAll()
@@ -180,5 +200,43 @@ func runSearchMode(query string, limit int) {
 func isToday(t time.Time) bool {
 	now := time.Now()
 	return t.Year() == now.Year() && t.Month() == now.Month() && t.Day() == now.Day()
+}
+
+// runShowSessions displays information about active sessions
+func runShowSessions() {
+	sessions := db.GetActiveSessions()
+	
+	if len(sessions) == 0 {
+		fmt.Println("No active sessions found.")
+		return
+	}
+	
+	fmt.Printf("Active Sessions (%d):\n", len(sessions))
+	fmt.Printf("%-25s %-20s %-20s %s\n", "SESSION ID", "CREATED", "LAST ACTIVITY", "PROCESS")
+	fmt.Printf("%s\n", strings.Repeat("-", 100))
+	
+	for _, session := range sessions {
+		createdStr := session.CreatedAt.Format("15:04:05")
+		activityStr := session.LastActivity.Format("15:04:05")
+		
+		fmt.Printf("%-25s %-20s %-20s %s\n", 
+			session.SessionID, createdStr, activityStr, session.ProcessInfo)
+	}
+}
+
+// runCleanupSessions removes inactive sessions
+func runCleanupSessions() {
+	// Clean up sessions inactive for more than 5 minutes
+	cleaned := db.CleanupInactiveSessions(5 * time.Minute)
+	
+	if cleaned > 0 {
+		fmt.Printf("Cleaned up %d inactive sessions.\n", cleaned)
+	} else {
+		fmt.Println("No inactive sessions to clean up.")
+	}
+	
+	// Show remaining active sessions
+	sessions := db.GetActiveSessions()
+	fmt.Printf("Active sessions remaining: %d\n", len(sessions))
 }
 
