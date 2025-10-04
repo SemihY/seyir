@@ -3,8 +3,11 @@ package collector
 import (
 	"bufio"
 	"context"
+	"log"
 	"logspot/internal/db"
 	"os"
+	"os/signal"
+	"syscall"
 )
 
 // StdinCollector collects logs from standard input
@@ -41,14 +44,29 @@ func (sc *StdinCollector) Start(ctx context.Context) error {
 	go func() {
 		defer sc.SetRunning(false)
 		
+		// Set up signal handling for graceful shutdown
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM, syscall.SIGPIPE)
+		
 		scanner := bufio.NewScanner(os.Stdin)
-		for scanner.Scan() {
+		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-sc.StopChan():
 				return
+			case sig := <-sigCh:
+				log.Printf("Stdin collector received signal %v, shutting down gracefully", sig)
+				return
 			default:
+				if !scanner.Scan() {
+					// Check if we hit EOF or an error
+					if err := scanner.Err(); err != nil {
+						log.Printf("Error reading stdin: %v", err)
+					}
+					return
+				}
+				
 				line := scanner.Text()
 				if line == "" {
 					continue
