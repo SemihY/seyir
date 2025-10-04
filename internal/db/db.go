@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	_ "github.com/marcboeker/go-duckdb"
+	_ "github.com/marcboeker/go-duckdb/v2"
 )
 
 var (
@@ -43,7 +43,7 @@ func generateSessionID() string {
 }
 
 // NewSessionConnection creates a new DuckDB instance with unique session ID
-// Each pipe operation gets its own DuckDB file (e.g., logs_session_123.duckdb)
+// Each pipe operation gets its own DuckDB file connected to shared DuckLake
 func NewSessionConnection() (*DB, error) {
 	lakeDirMutex.RLock()
 	lakeDir := globalLakeDir
@@ -79,10 +79,45 @@ func NewSessionConnection() (*DB, error) {
 	// Initialize database wrapper
 	dbWrapper := &DB{db}
 
-	// Ensure proper database schema for this session
+	// Create shared metadata database for federation (no extensions needed)
+	metadataDBPath := filepath.Join(lakeDir, "metadata.duckdb")
+	
+	// Try to attach shared metadata database for federation
+	attachSQL := fmt.Sprintf("ATTACH '%s' AS metadata;", metadataDBPath)
+	if _, err := dbWrapper.Exec(attachSQL); err != nil {
+		log.Printf("[WARN] Failed to attach metadata database: %v", err)
+		// Continue without federation - each session will be independent
+	} else {
+		log.Printf("[INFO] Attached to shared metadata database: %s", metadataDBPath)
+		
+		// Ensure metadata tables exist (compatible with DuckDB v1.3.0)
+		_, err := dbWrapper.Exec(`
+			CREATE TABLE IF NOT EXISTS metadata.session_registry (
+				session_id TEXT NOT NULL,
+				db_path TEXT NOT NULL,
+				created_at TIMESTAMP NOT NULL,
+				last_active TIMESTAMP NOT NULL
+			)
+		`)
+		if err != nil {
+			log.Printf("[WARN] Failed to create session registry: %v", err)
+		} else {
+			// Register this session
+			now := time.Now()
+			_, err = dbWrapper.Exec(`
+				INSERT INTO metadata.session_registry (session_id, db_path, created_at, last_active) 
+				VALUES (?, ?, ?, ?)
+			`, sessionID, sessionDBPath, now, now)
+			if err != nil {
+				log.Printf("[WARN] Failed to register session: %v", err)
+			}
+		}
+	}
+
+	// Ensure proper database schema
 	if err := dbWrapper.EnsureSchema(); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("failed to initialize session database schema: %v", err)
+		return nil, fmt.Errorf("failed to initialize database schema: %v", err)
 	}
 
 	return dbWrapper, nil
@@ -119,14 +154,14 @@ func InitDB(path string) *DB {
 
 // EnsureSchema creates the necessary tables and indexes if they don't exist
 func (db *DB) EnsureSchema() error {
-	// Create logs table with proper indexing for better performance
+	// Create logs table compatible with DuckDB v1.3.0 (no DEFAULT CURRENT_TIMESTAMP or PRIMARY KEY)
 	_, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS logs (
-			ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			ts TIMESTAMP NOT NULL,
 			source TEXT NOT NULL,
 			level TEXT NOT NULL,
 			message TEXT NOT NULL,
-			id TEXT NOT NULL PRIMARY KEY
+			id TEXT NOT NULL
 		)
 	`)
 	if err != nil {

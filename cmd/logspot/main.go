@@ -1,22 +1,22 @@
 package main
 
 import (
+	"database/sql"
 	"flag"
 	"fmt"
 	"log"
 	"logspot/internal/collector"
 	"logspot/internal/db"
-	"logspot/internal/server"
 	"net"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
-	"github.com/getlantern/systray"
+	_ "github.com/marcboeker/go-duckdb/v2"
 )
 
 func getDataDir() string {
@@ -29,10 +29,52 @@ func getDataDir() string {
 	return filepath.Join(homeDir, ".logspot")
 }
 
+// showUsage displays usage information and examples
+func showUsage() {
+	fmt.Println(`🪶 Logspot - Real-time Log Viewer with Lake Architecture
+
+Usage:
+    logspot [flags]                          # Interactive mode
+    command | logspot                        # Pipe mode (creates session DB)
+    logspot --search "query"                 # Search mode
+    logspot --daemon                         # Daemon mode (web server)
+    logspot --test                           # Generate test logs
+
+Flags:`)
+	flag.PrintDefaults()
+	
+	fmt.Println(`
+Examples:
+    # Pipe logs from any command (each creates its own session DB)
+    docker logs myapp | logspot
+    kubectl logs -f deployment/api | logspot
+    tail -f /var/log/nginx/access.log | logspot
+
+    # Search across all session databases
+    logspot --search "error" --limit 20      # Search for "error" 
+    logspot --search "*" --limit 10          # Show last 10 logs
+    logspot --search "api" --limit 50        # Search for "api" related logs
+
+    # Start daemon manually
+    logspot --daemon                         # Runs web server on localhost:7777
+
+    # Generate test data
+    logspot --test                          # Creates sample logs
+
+Architecture:
+    - Each pipe operation creates its own DuckDB session file
+    - All session files stored in ~/.logspot/lake/
+    - Web dashboard federates queries across all sessions
+    - Visit http://localhost:7777 for web interface
+
+Lake Directory: ~/.logspot/lake/logs_session_*.duckdb`)
+}
+
 var (
-	testMode     = flag.Bool("test", false, "Generate test logs")
 	forceCliMode = flag.Bool("cli", false, "Force CLI mode even on macOS")
-	daemonMode   = flag.Bool("daemon", false, "Run as daemon (web server)")
+	searchQuery  = flag.String("search", "", "Search logs in the database (use '*' for all logs)")
+	searchLimit  = flag.Int("limit", 100, "Limit number of search results")
+	showHelp     = flag.Bool("help", false, "Show usage information")
 )
 
 func main() {
@@ -43,13 +85,13 @@ func main() {
 	lakeDir := filepath.Join(dataDir, "lake")
 	db.SetGlobalLakeDir(lakeDir)
 	
-	if *testMode {
-		runTestMode()
+	if *showHelp {
+		showUsage()
 		return
 	}
 
-	if *daemonMode {
-		runDaemonMode()
+	if *searchQuery != "" {
+		runSearchMode(*searchQuery, *searchLimit)
 		return
 	}
 
@@ -57,13 +99,6 @@ func main() {
 	if isPipeOperation() {
 		runPipeMode()
 		return
-	}
-
-	// macOS'ta ve force CLI mode değilse menubar'ı çalıştır
-	if runtime.GOOS == "darwin" && !*forceCliMode {
-		runMenuMode()
-	} else {
-		runCLIMode()
 	}
 }
 
@@ -93,32 +128,34 @@ func runPipeMode() {
 		os.Exit(1)
 	}
 
-	// Wait for stdin to close (pipe ends)
+	// Set up signal handling for manual interruption
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGPIPE)
+	
+	// Wait for either stdin to close or manual interruption
+	go func() {
+		// Poll the stdin collector until it's no longer running
+		for {
+			time.Sleep(100 * time.Millisecond)
+			if stdinCollector, exists := collectorManager.GetCollector("stdin"); exists {
+				if !stdinCollector.IsHealthy() {
+					// Stdin collector finished, signal completion
+					sigChan <- syscall.SIGPIPE
+					return
+				}
+			} else {
+				// Collector was removed, exit
+				sigChan <- syscall.SIGPIPE
+				return
+			}
+		}
+	}()
+	
 	<-sigChan
 
 	// Stop collectors and exit
 	collectorManager.StopAll()
 	log.Printf("[INFO] Pipe operation completed")
-}
-
-// runDaemonMode runs as a persistent daemon with web server
-func runDaemonMode() {
-	log.Printf("[INFO] Running in daemon mode")
-	
-	// Start retention cleaner
-	go startRetentionCleaner()
-
-	// Start web server
-	go server.StartWebServer("localhost:7777")
-
-	// Keep daemon running
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	<-sigChan
-
-	log.Printf("[INFO] Daemon shutting down")
 }
 
 // ensureDaemonRunning starts the daemon if it's not already running
@@ -158,151 +195,110 @@ func ensureDaemonRunning() {
 	log.Printf("[WARN] Daemon may not have started properly")
 }
 
-func runCLIMode() {
-	log.Printf("[INFO] Running in CLI mode")
+// runSearchMode searches across all session databases and outputs results
+func runSearchMode(query string, limit int) {
+	fmt.Printf("Searching for: %s (limit: %d)\n", query, limit)
 	
-	// Start the daemon if not already running
-	ensureDaemonRunning()
+	lakeDir := db.GetGlobalLakeDir()
+	if lakeDir == "" {
+		fmt.Println("Error: Lake directory not configured")
+		os.Exit(1)
+	}
 	
-	// Create collector manager for this session
-	collectorManager := collector.NewManager()
-
-	// Enable Docker discovery if requested
-	if os.Getenv("ENABLE_DOCKER_CAPTURE") == "true" {
-		if err := collectorManager.EnableDocker(); err != nil {
-			fmt.Printf("Failed to enable Docker collector: %v\n", err)
-		}
-	}
-
-	// Auto-open browser if not disabled
-	if os.Getenv("DISABLE_AUTO_OPEN") != "true" {
-		go func() {
-			time.Sleep(1 * time.Second)
-			openBrowser("http://localhost:7777")
-		}()
-	}
-
-	// Graceful shutdown
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	<-sigChan
-
-	// Stop all collectors
-	collectorManager.StopAll()
-}
-
-func runMenuMode() {
-	log.Printf("[INFO] Running in menu mode")
-	
-	// Start the daemon if not already running
-	ensureDaemonRunning()
-	
-	// Create collector manager for this session
-	collectorManager := collector.NewManager()
-
-	// Enable Docker discovery if requested
-	if os.Getenv("ENABLE_DOCKER_CAPTURE") == "true" {
-		collectorManager.EnableDocker()
-	}
-
-	// macOS menubar uygulamasını başlat
-	systray.Run(onReady, func() {
-		collectorManager.StopAll()
-	})
-}
-
-func openBrowser(url string) {
-	var cmd string
-	var args []string
-	switch runtime.GOOS {
-	case "darwin": cmd = "open"
-	case "windows": cmd = "rundll32"; args = append(args,"url.dll,FileProtocolHandler")
-	default: cmd="xdg-open"
-	}
-	args = append(args,url)
-	exec.Command(cmd,args...).Start()
-}
-
-func runTestMode() {
-	fmt.Println("Generating test logs...")
-	
-	// Generate test logs
-	sources := []string{"app1", "app2", "nginx", "redis", "api-server"}
-	levels := []string{"INFO", "ERROR", "DEBUG", "WARN"}
-	messages := []string{
-		"Application started successfully",
-		"Connection established to database",
-		"Processing HTTP request GET /api/users",
-		"Cache miss for key: user:12345",
-		"Task completed in 245ms",
-		"Error occurred while processing request",
-		"Memory usage: 87%",
-		"New user registered: john@example.com",
-		"Scheduled task executed",
-		"Configuration reloaded",
-	}
-
-	// Create session connection for test logs
-	database, err := db.NewSessionConnection()
+	// Find all session databases
+	sessionFiles, err := filepath.Glob(filepath.Join(lakeDir, "logs_session_*.duckdb"))
 	if err != nil {
-		log.Printf("[ERROR] Failed to create session connection for test logs: %v", err)
-		return
+		fmt.Printf("Error finding session databases: %v\n", err)
+		os.Exit(1)
 	}
-	defer database.Close()
-
-	// Generate initial test logs
-	for i := 0; i < 25; i++ {
-		source := sources[i%len(sources)]
-		levelStr := levels[i%len(levels)]
-		message := fmt.Sprintf("%s - Test entry #%d", messages[i%len(messages)], i+1)
-		
-		level := parseLogLevel(levelStr)
-		entry := db.NewLogEntry(source, level, message)
-		db.SaveLog(database, entry)
+	
+	if len(sessionFiles) == 0 {
+		fmt.Println("No session databases found in lake directory")
+		os.Exit(0)
 	}
-
-	go server.StartWebServer("localhost:7777")
 	
-	fmt.Println("Test logs generated. Opening browser...")
-	go func() {
-		time.Sleep(1 * time.Second)
-		openBrowser("http://localhost:7777")
-	}()
+	fmt.Printf("Found %d session database(s)\n", len(sessionFiles))
 	
-	// Keep generating logs periodically
-	go func() {
-		ticker := time.NewTicker(3 * time.Second)
-		defer ticker.Stop()
-		counter := 26
-		
-		for range ticker.C {
-			source := sources[counter%len(sources)]
-			levelStr := levels[counter%len(levels)]
-			message := fmt.Sprintf("%s - Live test entry #%d", messages[counter%len(messages)], counter)
-			
-			level := parseLogLevel(levelStr)
-			entry := db.NewLogEntry(source, level, message)
-			db.SaveLog(database, entry)
-			counter++
+	// Create temporary DuckDB instance for federation
+	tempDB, err := sql.Open("duckdb", ":memory:")
+	if err != nil {
+		fmt.Printf("Error creating temporary database: %v\n", err)
+		os.Exit(1)
+	}
+	defer tempDB.Close()
+	
+	// Attach all session databases for federated queries
+	
+	// Fallback: Attach all session databases individually
+	var unionParts []string
+	for i, sessionFile := range sessionFiles {
+		dbAlias := fmt.Sprintf("session_%d", i)
+		attachSQL := fmt.Sprintf("ATTACH '%s' AS %s", sessionFile, dbAlias)
+		if _, err := tempDB.Exec(attachSQL); err != nil {
+			fmt.Printf("Warning: Failed to attach %s: %v\n", sessionFile, err)
+			continue
 		}
-	}()
+		unionParts = append(unionParts, fmt.Sprintf("SELECT * FROM %s.logs", dbAlias))
+		fmt.Printf("Attached: %s\n", filepath.Base(sessionFile))
+	}
 	
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	<-sigChan
+	if len(unionParts) == 0 {
+		fmt.Println("No databases could be attached for querying")
+		os.Exit(1)
+	}
+	
+	// Build and execute federated query
+	federatedQuery := strings.Join(unionParts, " UNION ALL ")
+	if query != "" {
+		federatedQuery = fmt.Sprintf("SELECT * FROM (%s) WHERE message LIKE '%%%s%%' OR source LIKE '%%%s%%'", 
+			federatedQuery, query, query)
+	}
+	federatedQuery = fmt.Sprintf("SELECT * FROM (%s) ORDER BY ts DESC LIMIT %d", federatedQuery, limit)
+	
+	fmt.Printf("\nExecuting search...\n")
+	rows, err := tempDB.Query(federatedQuery)
+	if err != nil {
+		fmt.Printf("Query failed: %v\n", err)
+		os.Exit(1)
+	}
+	defer rows.Close()
+	
+	// Display results
+	fmt.Printf("\nResults:\n")
+	fmt.Printf("%-20s %-15s %-8s %s\n", "TIMESTAMP", "SOURCE", "LEVEL", "MESSAGE")
+	fmt.Printf("%s\n", strings.Repeat("-", 80))
+	
+	count := 0
+	for rows.Next() {
+		var timestamp time.Time
+		var source, level, message, id string
+		if err := rows.Scan(&timestamp, &source, &level, &message, &id); err != nil {
+			fmt.Printf("Error scanning row: %v\n", err)
+			continue
+		}
+		
+		// Format timestamp to show only time if today, otherwise show date
+		timeStr := timestamp.Format("15:04:05")
+		if !isToday(timestamp) {
+			timeStr = timestamp.Format("2006-01-02 15:04")
+		}
+		
+		// Truncate message if too long
+		if len(message) > 50 {
+			message = message[:47] + "..."
+		}
+		
+		fmt.Printf("%-20s %-15s %-8s %s\n", timeStr, source, level, message)
+		count++
+	}
+	
+	fmt.Printf("\nFound %d matching log entries\n", count)
 }
 
-func parseLogLevel(levelStr string) db.Level {
-	switch levelStr {
-	case "ERROR":
-		return db.ERROR
-	case "WARN":
-		return db.WARN
-	case "DEBUG":
-		return db.DEBUG
-	default:
-		return db.INFO
-	}
+// isToday checks if the given time is today
+func isToday(t time.Time) bool {
+	now := time.Now()
+	return t.Year() == now.Year() && t.Month() == now.Month() && t.Day() == now.Day()
 }
 
 // isServerRunning checks if a server is already running on the given address
@@ -314,104 +310,5 @@ func isServerRunning(addr string) bool {
 	conn.Close()
 	return true
 }
-
-// startRetentionCleaner runs retention cleanup across all session databases
-func startRetentionCleaner() {
-	for {
-		time.Sleep(24 * time.Hour) // Run once per day
-		
-		lakeDir := db.GetGlobalLakeDir()
-		if lakeDir == "" {
-			log.Printf("[WARN] Lake directory not set, skipping retention cleanup")
-			continue
-		}
-		
-		// Find all session databases
-		sessionFiles, err := filepath.Glob(filepath.Join(lakeDir, "logs_session_*.duckdb"))
-		if err != nil {
-			log.Printf("[ERROR] Failed to find session databases for retention: %v", err)
-			continue
-		}
-		
-		// Clean up each session database
-		for _, sessionFile := range sessionFiles {
-			func(dbPath string) {
-				database := db.InitDB(dbPath)
-				if database == nil {
-					log.Printf("[ERROR] Failed to open %s for retention", dbPath)
-					return
-				}
-				defer database.Close()
-				
-				// Delete logs older than 7 days
-				cutoff := time.Now().AddDate(0, 0, -7)
-				_, err = database.Exec(`DELETE FROM logs WHERE ts < ?`, cutoff)
-				if err != nil {
-					log.Printf("[ERROR] Retention cleanup failed for %s: %v", dbPath, err)
-				} else {
-					log.Printf("[INFO] Retention cleanup completed for %s", dbPath)
-				}
-			}(sessionFile)
-		}
-	}
-}
-
-// macOS Menubar Functions
-func onReady() {
-	// Skip SetIcon for now to avoid crashes
-	// systray will use a default icon
-	systray.SetTitle("🪶")
-	systray.SetTooltip("Logspot - Real-time Log Viewer")
-
-	mOpen := systray.AddMenuItem("🔍 Open Logs", "Open log viewer in browser")
-	mTest := systray.AddMenuItem("🧪 Generate Test Logs", "Create sample log entries")
-	systray.AddSeparator()
-	mQuit := systray.AddMenuItem("❌ Quit", "Quit Logspot")
-
-	go func() {
-		for {
-			select {
-			case <-mOpen.ClickedCh:
-				openBrowser("http://localhost:7777")
-			case <-mTest.ClickedCh:
-				generateTestLogs()
-			case <-mQuit.ClickedCh:
-				systray.Quit()
-				return
-			}
-		}
-	}()
-}
-
-func generateTestLogs() {
-	go func() {
-		// Create session connection for test logs
-		database, err := db.NewSessionConnection()
-		if err != nil {
-			log.Printf("[ERROR] Failed to create session connection for test logs: %v", err)
-			return
-		}
-		defer database.Close()
-		
-		sources := []string{"menubar-test", "sample-app", "test-service"}
-		levels := []string{"INFO", "WARN", "ERROR"}
-		messages := []string{
-			"Test log from menubar action",
-			"Sample application event triggered",
-			"Generated test message from menu",
-		}
-
-		for i := 0; i < 5; i++ {
-			source := sources[i%len(sources)]
-			levelStr := levels[i%len(levels)]
-			message := fmt.Sprintf("%s #%d", messages[i%len(messages)], i+1)
-			
-			level := parseLogLevel(levelStr)
-			entry := db.NewLogEntry(source, level, message)
-			db.SaveLog(database, entry)
-		}
-	}()
-}
-
 
 
