@@ -77,19 +77,26 @@ The built-in **auto-discovery** module (`autodiscovery.go`) watches running cont
 logspot/
 ├── cmd/
 │   ├── logspot/             # Main CLI entrypoint
-│   └── menu/                # macOS menubar UI
+│   └── menu/                # macOS menubar UI (planned)
 ├── internal/
-│   ├── collector/           # stdin & container log collectors
+│   ├── collector/           # stdin log collectors
+│   │   └── stdin.go
 │   ├── db/                  # DuckDB setup & query layer
+│   │   ├── db.go
+│   │   └── log_entry.go
 │   ├── discovery/           # Container auto-discovery
+│   │   └── docker.go
 │   ├── retention/           # Log retention and cleanup
+│   │   └── retention.go
 │   ├── server/              # HTTP server + web UI
-│   └── tail/                # Live log tailing
+│   │   └── server.go
+│   └── tail/                # Live log tailing & SSE
+│       └── broadcaster.go
 ├── ui/
-│   ├── index.html           # Lightweight log viewer
-│   └── main.js              # Instant search logic
+│   ├── index.html           # Modern log viewer UI
+│   └── main.js              # Real-time search & pagination
 ├── Makefile                 # Build, run, clean targets
-├── .goreleaser.yaml         # Release configuration for Brew & GHCR
+├── .goreleaser.yaml         # Release configuration for Brew & GHCR (planned)
 ├── go.mod                   # Go module definition
 └── README.md
 ```
@@ -98,12 +105,13 @@ logspot/
 
 ## 🧩 Architecture Overview
 
-* **Collector**: Streams logs from stdin or containers into DuckDB.
-* **Database (DuckDB)**: Persistent local storage with SQL query support.
-* **Server**: Minimal embedded HTTP server for the UI and search API.
-* **UI**: Pure HTML/JS page served from `/`, no frameworks.
-* **Retention**: Background goroutine that deletes old logs based on configured TTL.
-* **Menu App (macOS)**: Optional menubar integration using `webview` or `fyne`.
+* **Collector** (`internal/collector/`): Captures logs from stdin and pipes into DuckDB.
+* **Discovery** (`internal/discovery/`): Auto-discovers Docker containers and streams their logs.
+* **Database** (`internal/db/`): DuckDB wrapper with schema management and log entry types.
+* **Server** (`internal/server/`): HTTP server serving the UI and SSE endpoints.
+* **Tail** (`internal/tail/`): Real-time log broadcasting via Server-Sent Events (SSE).
+* **Retention** (`internal/retention/`): Background cleanup of old logs based on TTL.
+* **UI** (`ui/`): Modern, performant log viewer with search, pagination, and tail mode.
 
 ---
 
