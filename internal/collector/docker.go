@@ -22,6 +22,7 @@ type DockerCollector struct {
 	*BaseCollector
 	knownContainers map[string]*ContainerLogCollector
 	mutex           sync.RWMutex
+	discoveryMutex  sync.Mutex // Prevents concurrent discovery operations
 }
 
 // ContainerLogCollector handles logs from a single Docker container
@@ -116,6 +117,10 @@ func (dc *DockerCollector) GetActiveContainers() []string {
 
 // discoverContainers finds Docker containers that opt-in to log tracking
 func (dc *DockerCollector) discoverContainers(ctx context.Context) {
+	// Prevent concurrent discovery operations
+	dc.discoveryMutex.Lock()
+	defer dc.discoveryMutex.Unlock()
+	
 	// Look for containers with seyir.enable=true label (opt-in)
 	args := []string{"ps", "--filter", "label=seyir.enable=true", "--format", "{{.Names}}\t{{.Label \"seyir.project\"}}\t{{.Label \"seyir.component\"}}"}
 	
@@ -128,7 +133,7 @@ func (dc *DockerCollector) discoverContainers(ctx context.Context) {
 	currentContainers := make(map[string]bool)
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 	
-	discoveredCount := 0
+	newContainersCount := 0
 	for _, line := range lines {
 		if line == "" {
 			continue
@@ -151,7 +156,6 @@ func (dc *DockerCollector) discoverContainers(ctx context.Context) {
 		}
 		
 		currentContainers[containerName] = true
-		discoveredCount++
 		
 		dc.mutex.RLock()
 		_, exists := dc.knownContainers[containerName]
@@ -159,11 +163,12 @@ func (dc *DockerCollector) discoverContainers(ctx context.Context) {
 		
 		if !exists {
 			dc.startContainerCollection(ctx, containerName, project, component)
+			newContainersCount++
 		}
 	}
 	
-	if discoveredCount > 0 {
-		log.Printf("[INFO] Discovered %d containers with seyir tracking enabled", discoveredCount)
+	if newContainersCount > 0 {
+		log.Printf("[INFO] Started tracking %d new containers with seyir.enable=true", newContainersCount)
 	}
 	
 	// Stop collection for containers that are no longer running
