@@ -28,7 +28,7 @@ func getDataDir() string {
 
 // showUsage displays usage information and examples
 func showUsage() {
-	fmt.Println(`🪶 Logspot - Real-time Log Viewer with Lake Architecture
+	fmt.Println(`Logspot - Real-time Log Viewer
 
 Usage:
     logspot [flags]                          # Interactive mode
@@ -36,8 +36,6 @@ Usage:
     logspot --search "query"                 # Search mode
     logspot --sessions                       # Show active sessions
     logspot --cleanup                        # Cleanup inactive sessions
-    logspot --daemon                         # Daemon mode (web server)
-    logspot --test                           # Generate test logs
 
 Flags:`)
 	flag.PrintDefaults()
@@ -54,12 +52,6 @@ Examples:
     logspot --search "*" --limit 10          # Show last 10 logs
     logspot --search "api" --limit 50        # Search for "api" related logs
 
-    # Start daemon manually
-    logspot --daemon                         # Runs web server on localhost:7777
-
-    # Generate test data
-    logspot --test                          # Creates sample logs
-
 Architecture:
     - Each pipe operation creates one compressed Parquet file per session
     - Files stored in ~/.logspot/lake/session_*.parquet (SNAPPY compressed)
@@ -67,7 +59,6 @@ Architecture:
     - Web dashboard federates queries across all Parquet files
     - Multiple concurrent sessions supported
     - Session management and cleanup available
-    - Visit http://localhost:7777 for web interface
 
 Lake Directory: ~/.logspot/lake/session_*.parquet`)
 }
@@ -195,12 +186,6 @@ func runSearchMode(query string, limit int) {
 		count++
 	}
 	fmt.Printf("\nFound %d matching log entries\n", count)
-}
-
-// isToday checks if the given time is today
-func isToday(t time.Time) bool {
-	now := time.Now()
-	return t.Year() == now.Year() && t.Month() == now.Month() && t.Day() == now.Day()
 }
 
 // runShowSessions displays information about active sessions
