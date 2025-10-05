@@ -1,16 +1,164 @@
 package server
 
 import (
-	"time"
+	"encoding/json"
+	"fmt"
+	"logspot/internal/db"
+	"net/http"
+	"strconv"
 
 	_ "github.com/marcboeker/go-duckdb/v2"
 )
 
-// LogEntry represents a log entry for API responses
-type LogEntry struct {
-	ID        string    `json:"id"`
-	Timestamp time.Time `json:"timestamp"`
-	Source    string    `json:"source"`
-	Level     string    `json:"level"`
-	Message   string    `json:"message"`
+// LogsResponse represents the JSON response for API endpoints
+type LogsResponse struct {
+	Logs        []*db.LogEntry `json:"logs"`
+	Total       int            `json:"total"`
+	Page        int            `json:"page"`
+	PerPage     int            `json:"perPage"`
+	HasNext     bool           `json:"hasNext"`
+	HasPrevious bool           `json:"hasPrevious"`
+}
+
+// Server represents the web server instance
+type Server struct {
+	port string
+}
+
+// New creates a new server instance
+func New(port string) *Server {
+	return &Server{port: port}
+}
+
+// Start starts the web server
+func (s *Server) Start() error {
+	fmt.Printf("Starting web server on port %s\n", s.port)
+	fmt.Printf("Access at: http://localhost:%s\n", s.port)
+	
+	// Serve static files from ui/ directory
+	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("ui/"))))
+	
+	// Serve main HTML page
+	http.HandleFunc("/", s.serveHomePage)
+	
+	// API endpoint for logs with pagination
+	http.HandleFunc("/api/logs", s.serveLogsAPI)
+	
+	// API endpoint for search
+	http.HandleFunc("/api/search", s.serveSearchAPI)
+	
+	// Start server
+	return http.ListenAndServe(":"+s.port, nil)
+}
+
+// serveHomePage serves the main HTML page from ui/index.html
+func (s *Server) serveHomePage(w http.ResponseWriter, r *http.Request) {
+	http.ServeFile(w, r, "ui/index.html")
+}
+
+// serveLogsAPI handles the /api/logs endpoint with pagination
+func (s *Server) serveLogsAPI(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	
+	// Parse pagination parameters
+	pageStr := r.URL.Query().Get("page")
+	perPageStr := r.URL.Query().Get("perPage")
+	
+	page, err := strconv.Atoi(pageStr)
+	if err != nil || page < 1 {
+		page = 1
+	}
+	
+	perPage, err := strconv.Atoi(perPageStr)
+	if err != nil || perPage < 1 || perPage > 1000 {
+		perPage = 50
+	}
+	
+	// Get total count first
+	total, err := db.CountLogs("*")
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error": "%s"}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+	
+	// Calculate offset for pagination
+	offset := (page - 1) * perPage
+	
+	// Get logs with proper pagination
+	logs, err := db.SearchLogsWithPagination("*", perPage, offset)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error": "%s"}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+	
+	// Calculate pagination flags
+	hasNext := offset+perPage < total
+	hasPrevious := page > 1
+	
+	response := LogsResponse{
+		Logs:        logs,
+		Total:       total,
+		Page:        page,
+		PerPage:     perPage,
+		HasNext:     hasNext,
+		HasPrevious: hasPrevious,
+	}
+	
+	json.NewEncoder(w).Encode(response)
+}
+
+// serveSearchAPI handles the /api/search endpoint
+func (s *Server) serveSearchAPI(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	
+	query := r.URL.Query().Get("q")
+	if query == "" {
+		query = "*"
+	}
+	
+	// Parse pagination parameters
+	pageStr := r.URL.Query().Get("page")
+	perPageStr := r.URL.Query().Get("perPage")
+	
+	page, err := strconv.Atoi(pageStr)
+	if err != nil || page < 1 {
+		page = 1
+	}
+	
+	perPage, err := strconv.Atoi(perPageStr)
+	if err != nil || perPage < 1 || perPage > 1000 {
+		perPage = 50
+	}
+	
+	// Get total count for search query
+	total, err := db.CountLogs(query)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error": "%s"}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+	
+	// Calculate offset for pagination
+	offset := (page - 1) * perPage
+	
+	// Get search results with proper pagination
+	logs, err := db.SearchLogsWithPagination(query, perPage, offset)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error": "%s"}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+	
+	// Calculate pagination flags
+	hasNext := offset+perPage < total
+	hasPrevious := page > 1
+	
+	response := LogsResponse{
+		Logs:        logs,
+		Total:       total,
+		Page:        page,
+		PerPage:     perPage,
+		HasNext:     hasNext,
+		HasPrevious: hasPrevious,
+	}
+	
+	json.NewEncoder(w).Encode(response)
 }

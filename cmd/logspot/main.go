@@ -6,6 +6,7 @@ import (
 	"log"
 	"logspot/internal/collector"
 	"logspot/internal/db"
+	"logspot/internal/server"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -36,6 +37,7 @@ Usage:
     logspot --search "query"                 # Search mode
     logspot --sessions                       # Show active sessions
     logspot --cleanup                        # Cleanup inactive sessions
+    logspot --web                            # Start web server
 
 Flags:`)
 	flag.PrintDefaults()
@@ -51,6 +53,10 @@ Examples:
     logspot --search "error" --limit 20      # Search for "error" 
     logspot --search "*" --limit 10          # Show last 10 logs
     logspot --search "api" --limit 50        # Search for "api" related logs
+
+    # Start web server for log viewing
+    logspot --web                            # Start on port 8080
+    logspot --web --port 9090                # Start on custom port
 
 Architecture:
     - Each pipe operation creates one compressed Parquet file per session
@@ -70,6 +76,8 @@ var (
 	showHelp       = flag.Bool("help", false, "Show usage information")
 	showSessions   = flag.Bool("sessions", false, "Show active sessions")
 	cleanupSessions = flag.Bool("cleanup", false, "Cleanup inactive sessions")
+	webServer      = flag.Bool("web", false, "Start web server for log viewing")
+	webPort        = flag.String("port", "8080", "Port for web server")
 )
 
 func main() {
@@ -97,6 +105,11 @@ func main() {
 
 	if *searchQuery != "" {
 		runSearchMode(*searchQuery, *searchLimit)
+		return
+	}
+
+	if *webServer {
+		runWebServer(*webPort)
 		return
 	}
 
@@ -224,5 +237,14 @@ func runCleanupSessions() {
 	// Show remaining active sessions
 	sessions := db.GetActiveSessions()
 	fmt.Printf("Active sessions remaining: %d\n", len(sessions))
+}
+
+// runWebServer starts the web server for log viewing
+func runWebServer(port string) {
+	srv := server.New(port)
+	if err := srv.Start(); err != nil {
+		fmt.Printf("Failed to start web server: %v\n", err)
+		os.Exit(1)
+	}
 }
 

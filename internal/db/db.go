@@ -421,6 +421,115 @@ func SearchLogs(query string, limit int) ([]*LogEntry, error) {
 	return results, nil
 }
 
+// CountLogs returns the total number of logs matching the query
+func CountLogs(query string) (int, error) {
+	lakeDirMutex.RLock()
+	lakeDir := globalLakeDir
+	lakeDirMutex.RUnlock()
+
+	if lakeDir == "" {
+		return 0, fmt.Errorf("global lake directory not set. Call SetGlobalLakeDir() first")
+	}
+
+	// Create a temporary DuckDB connection to query Parquet files
+	db, err := sql.Open("duckdb", ":memory:")
+	if err != nil {
+		return 0, fmt.Errorf("failed to create in-memory database: %v", err)
+	}
+	defer db.Close()
+
+	// Find all session Parquet files in the lake directory
+	parquetPattern := filepath.Join(lakeDir, "session_*.parquet")
+	
+	// Create a query that counts rows from all Parquet files using glob pattern
+	baseSQL := fmt.Sprintf(`
+		SELECT COUNT(*) 
+		FROM read_parquet('%s')`, parquetPattern)
+	
+	var row *sql.Row
+	if query == "*" {
+		// Count all logs
+		row = db.QueryRow(baseSQL)
+	} else {
+		// Count with filter
+		fullSQL := baseSQL + ` WHERE message LIKE ? OR source LIKE ?`
+		queryPattern := "%" + query + "%"
+		row = db.QueryRow(fullSQL, queryPattern, queryPattern)
+	}
+	
+	var count int
+	if err := row.Scan(&count); err != nil {
+		// Check if no parquet files exist yet
+		matches, globErr := filepath.Glob(parquetPattern)
+		if globErr == nil && len(matches) == 0 {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("failed to count logs: %v", err)
+	}
+	
+	return count, nil
+}
+
+// SearchLogsWithPagination returns logs with pagination support
+func SearchLogsWithPagination(query string, limit int, offset int) ([]*LogEntry, error) {
+	lakeDirMutex.RLock()
+	lakeDir := globalLakeDir
+	lakeDirMutex.RUnlock()
+
+	if lakeDir == "" {
+		return nil, fmt.Errorf("global lake directory not set. Call SetGlobalLakeDir() first")
+	}
+
+	// Create a temporary DuckDB connection to query Parquet files
+	db, err := sql.Open("duckdb", ":memory:")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create in-memory database: %v", err)
+	}
+	defer db.Close()
+
+	// Find all session Parquet files in the lake directory
+	parquetPattern := filepath.Join(lakeDir, "session_*.parquet")
+	
+	// Create a query that reads from all Parquet files using glob pattern
+	baseSQL := fmt.Sprintf(`
+		SELECT ts, source, level, message, id 
+		FROM read_parquet('%s')`, parquetPattern)
+	
+	var rows *sql.Rows
+	if query == "*" {
+		// Show all logs with pagination
+		fullSQL := baseSQL + ` ORDER BY ts DESC LIMIT ? OFFSET ?`
+		rows, err = db.Query(fullSQL, limit, offset)
+	} else {
+		// Search with filter and pagination
+		fullSQL := baseSQL + ` WHERE message LIKE ? OR source LIKE ? ORDER BY ts DESC LIMIT ? OFFSET ?`
+		queryPattern := "%" + query + "%"
+		rows, err = db.Query(fullSQL, queryPattern, queryPattern, limit, offset)
+	}
+	if err != nil {
+		// Check if no parquet files exist yet
+		matches, globErr := filepath.Glob(parquetPattern)
+		if globErr == nil && len(matches) == 0 {
+			return []*LogEntry{}, nil
+		}
+		return nil, fmt.Errorf("failed to query parquet files: %v", err)
+	}
+	defer rows.Close()
+
+	var results []*LogEntry
+	for rows.Next() {
+		var e LogEntry
+		if err := rows.Scan(&e.Ts, &e.Source, &e.Level, &e.Message, &e.ID); err != nil {
+			return nil, err
+		}
+		results = append(results, &e)
+	}
+	
+	return results, nil
+}
+
+// Session management functions
+
 // GetActiveSessions returns information about currently active sessions
 func GetActiveSessions() map[string]SessionInfo {
 	sessionsMutex.RLock()
