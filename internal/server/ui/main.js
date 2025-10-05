@@ -93,7 +93,7 @@ class LogViewer {
 
     this.currentPage = page;
     this.showLoading(true);
-    this.connectionStatus.textContent = "🔄 Yükleniyor...";
+    this.connectionStatus.textContent = "🔄 Loading...";
 
     try {
       const response = await fetch(
@@ -106,12 +106,12 @@ class LogViewer {
       }
 
       this.displayLogs(data);
-      this.connectionStatus.textContent = "🔗 Bağlı";
-      this.lastUpdate.textContent = `Son güncelleme: ${new Date().toLocaleTimeString()}`;
+      this.connectionStatus.textContent = "🔗 Connected";
+      this.lastUpdate.textContent = `Last update: ${new Date().toLocaleTimeString()}`;
     } catch (error) {
       console.error("Failed to load logs:", error);
-      this.showError("Loglar yüklenirken hata: " + error.message);
-      this.connectionStatus.textContent = "❌ Bağlantı Hatası";
+      this.showError("Error loading logs: " + error.message);
+      this.connectionStatus.textContent = "❌ Connection Error";
     } finally {
       this.showLoading(false);
     }
@@ -122,7 +122,7 @@ class LogViewer {
 
     this.currentPage = page;
     this.showLoading(true);
-    this.connectionStatus.textContent = "🔍 Aranıyor...";
+    this.connectionStatus.textContent = "🔍 Searching...";
 
     try {
       const response = await fetch(
@@ -137,12 +137,12 @@ class LogViewer {
       }
 
       this.displayLogs(data);
-      this.connectionStatus.textContent = "🔗 Bağlı";
-      this.lastUpdate.textContent = `Son güncelleme: ${new Date().toLocaleTimeString()}`;
+      this.connectionStatus.textContent = "🔗 Connected";
+      this.lastUpdate.textContent = `Last update: ${new Date().toLocaleTimeString()}`;
     } catch (error) {
       console.error("Failed to search logs:", error);
-      this.showError("Arama sırasında hata: " + error.message);
-      this.connectionStatus.textContent = "❌ Arama Hatası";
+      this.showError("Error during search: " + error.message);
+      this.connectionStatus.textContent = "❌ Search Error";
     } finally {
       this.showLoading(false);
     }
@@ -154,7 +154,7 @@ class LogViewer {
 
     if (!data.logs || data.logs.length === 0) {
       this.logContainer.innerHTML =
-        '<tr><td colspan="7" class="status">Log bulunamadı</td></tr>';
+        '<tr><td colspan="7" class="status">No logs found</td></tr>';
     } else {
       data.logs.forEach((log) => {
         const logElement = this.createLogElement(log);
@@ -175,10 +175,19 @@ class LogViewer {
     const levelLower = (log.level || "INFO").toLowerCase();
 
     // Generate unique ID for collapsible details
-    const detailId = `detail_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const detailId = `detail_${Date.now()}_${Math.random()
+      .toString(36)
+      .substr(2, 9)}`;
 
     // Check if we have additional structured data
-    const hasStructuredData = log.trace_id || log.process || log.component || log.thread || log.user_id || log.request_id || (log.tags && log.tags.length > 0);
+    const hasStructuredData =
+      log.trace_id ||
+      log.process ||
+      log.component ||
+      log.thread ||
+      log.user_id ||
+      log.request_id ||
+      (log.tags && log.tags.length > 0);
 
     tr.innerHTML = `
       <td class="timestamp">${timestamp}</td>
@@ -191,10 +200,20 @@ class LogViewer {
       <td class="source">${this.escapeHtml(log.source || "unknown")}</td>
       <td class="process">${this.escapeHtml(log.process || "-")}</td>
       <td class="trace-id">
-        ${log.trace_id ? `<code class="trace-id-code">${this.escapeHtml(log.trace_id)}</code>` : "-"}
+        ${
+          log.trace_id
+            ? `<code class="trace-id-code">${this.escapeHtml(
+                log.trace_id
+              )}</code>`
+            : "-"
+        }
       </td>
       <td class="details-toggle">
-        ${hasStructuredData ? `<button onclick="toggleDetails('${detailId}')" class="details-btn">📋</button>` : "-"}
+        ${
+          hasStructuredData
+            ? `<button onclick="toggleDetails('${detailId}')" class="details-btn">📋</button>`
+            : "-"
+        }
       </td>
     `;
 
@@ -203,25 +222,41 @@ class LogViewer {
       const detailsRow = document.createElement("tr");
       detailsRow.id = detailId;
       detailsRow.className = "details-row hidden";
-      
+
       const structuredFields = [];
-      if (log.component) structuredFields.push(`<strong>Bileşen:</strong> ${this.escapeHtml(log.component)}`);
-      if (log.thread) structuredFields.push(`<strong>Thread:</strong> ${this.escapeHtml(log.thread)}`);
-      if (log.user_id) structuredFields.push(`<strong>Kullanıcı ID:</strong> ${this.escapeHtml(log.user_id)}`);
-      if (log.request_id) structuredFields.push(`<strong>İstek ID:</strong> <code>${this.escapeHtml(log.request_id)}</code>`);
+      if (log.component)
+        structuredFields.push(
+          `<strong>Component:</strong> ${this.escapeHtml(log.component)}`
+        );
+      if (log.thread)
+        structuredFields.push(
+          `<strong>Thread:</strong> ${this.escapeHtml(log.thread)}`
+        );
+      if (log.user_id)
+        structuredFields.push(
+          `<strong>User ID:</strong> ${this.escapeHtml(log.user_id)}`
+        );
+      if (log.request_id)
+        structuredFields.push(
+          `<strong>Request ID:</strong> <code>${this.escapeHtml(
+            log.request_id
+          )}</code>`
+        );
       if (log.tags && log.tags.length > 0) {
-        const tagsHtml = log.tags.map(tag => `<span class="tag">${this.escapeHtml(tag)}</span>`).join(' ');
-        structuredFields.push(`<strong>Etiketler:</strong> ${tagsHtml}`);
+        const tagsHtml = log.tags
+          .map((tag) => `<span class="tag">${this.escapeHtml(tag)}</span>`)
+          .join(" ");
+        structuredFields.push(`<strong>Tags:</strong> ${tagsHtml}`);
       }
-      
+
       detailsRow.innerHTML = `
         <td colspan="7" class="details-content">
           <div class="structured-data">
-            ${structuredFields.join('<br>')}
+            ${structuredFields.join("<br>")}
           </div>
         </td>
       `;
-      
+
       // Insert details row after the main row
       tr.after(detailsRow);
     }
@@ -232,8 +267,8 @@ class LogViewer {
   updatePaginationInfo(data) {
     const totalPages = Math.ceil(data.total / this.pageSize);
 
-    this.logCount.textContent = `${data.total || 0} log`;
-    this.pageInfo.textContent = `Sayfa ${data.page || 1} / ${Math.max(
+    this.logCount.textContent = `${data.total || 0} logs`;
+    this.pageInfo.textContent = `Page ${data.page || 1} / ${Math.max(
       1,
       totalPages
     )}`;
@@ -262,7 +297,7 @@ class LogViewer {
     this.logContainer.innerHTML = `
       <tr>
         <td colspan="4" class="error">
-          <div>⚠️ Hata</div>
+          <div>⚠️ Error</div>
           <div>${message}</div>
         </td>
       </tr>
@@ -281,7 +316,7 @@ class LogViewer {
 function toggleDetails(detailId) {
   const detailsRow = document.getElementById(detailId);
   if (detailsRow) {
-    detailsRow.classList.toggle('hidden');
+    detailsRow.classList.toggle("hidden");
   }
 }
 

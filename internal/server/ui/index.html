@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="tr">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -575,7 +575,7 @@
               <path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
             </svg>
           </div>
-          <input id="search" class="search-input" placeholder="Log araması yapın (mesaj, kaynak, trace ID, işlem, bileşen)..." type="search">
+          <input id="search" class="search-input" placeholder="Search logs (message, source, trace ID, process, component)..." type="search">
         </div>
       </div>
 
@@ -586,11 +586,11 @@
             <path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2v1z"/>
             <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z"/>
           </svg>
-          Yenile
+          Refresh
         </button>
         
         <label style="display: flex; align-items: center; gap: 0.5rem;">
-          <span>Sayfa Boyutu:</span>
+          <span>Page Size:</span>
           <select id="bufferSize" class="select">
             <option value="25">25</option>
             <option value="50" selected>50</option>
@@ -601,11 +601,11 @@
 
         <div class="status-indicator">
           <div class="status-dot pulse"></div>
-          <span class="loading" id="loading">Yükleniyor...</span>
-          <span id="connectionStatus">Hazır</span>
+          <span class="loading" id="loading">Loading...</span>
+          <span id="connectionStatus">Ready</span>
         </div>
 
-        <span id="lastUpdate" style="font-size: 0.875rem; color: #6b7280;">Son güncelleme: -</span>
+        <span id="lastUpdate" style="font-size: 0.875rem; color: #6b7280;">Last update: -</span>
       </div>
 
       <!-- Table -->
@@ -613,13 +613,13 @@
         <table class="table">
           <thead>
             <tr>
-              <th style="width: 180px;">Zaman</th>
-              <th style="width: 100px;">Seviye</th>
-              <th>Mesaj</th>
-              <th style="width: 120px;">Kaynak</th>
-              <th style="width: 120px;">İşlem</th>
+              <th style="width: 180px;">Timestamp</th>
+              <th style="width: 100px;">Level</th>
+              <th>Message</th>
+              <th style="width: 120px;">Source</th>
+              <th style="width: 120px;">Process</th>
               <th style="width: 120px;">Trace ID</th>
-              <th style="width: 50px;">Detay</th>
+              <th style="width: 50px;">Details</th>
             </tr>
           </thead>
           <tbody id="logContainer">
@@ -630,8 +630,8 @@
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
                   </svg>
                 </div>
-                <h3>Loglar yükleniyor...</h3>
-                <p>Lütfen bekleyin, veriler getiriliyor.</p>
+                <h3>Loading logs...</h3>
+                <p>Please wait, fetching data.</p>
               </td>
             </tr>
           </tbody>
@@ -640,18 +640,18 @@
         <!-- Pagination -->
         <div class="pagination" id="pagination">
           <div class="pagination-info">
-            <span id="logCount">0 log</span> • 
-            <span id="pageInfo">Sayfa 1 / 1</span>
+            <span id="logCount">0 logs</span> • 
+            <span id="pageInfo">Page 1 / 1</span>
           </div>
           <div class="pagination-controls">
             <button id="prevPage" class="page-btn">
               <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16" style="margin-right: 0.25rem;">
                 <path fill-rule="evenodd" d="M11.354 1.646a.5.5 0 0 1 0 .708L5.707 8l5.647 5.646a.5.5 0 0 1-.708.708l-6-6a.5.5 0 0 1 0-.708l6-6a.5.5 0 0 1 .708 0z"/>
               </svg>
-              Önceki
+              Previous
             </button>
             <button id="nextPage" class="page-btn">
-              Sonraki
+              Next
               <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16" style="margin-left: 0.25rem;">
                 <path fill-rule="evenodd" d="M4.646 1.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1 0 .708l-6 6a.5.5 0 0 1-.708-.708L10.293 8 4.646 2.354a.5.5 0 0 1 0-.708z"/>
               </svg>
