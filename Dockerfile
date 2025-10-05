@@ -1,27 +1,18 @@
-FROM golang:1.24-bullseye AS builder
+FROM golang:1.24-bookworm AS builder
 
-# Install dependencies for building
 RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
-    libc6-dev \
-    libstdc++-10-dev \
-    libsqlite3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Copy go mod files
 COPY go.mod go.sum ./
-
-# Download dependencies
 RUN go mod download
 
-# Copy source code
 COPY . .
 
-# Build the application with proper C++ linking
-RUN CGO_ENABLED=1 CGO_LDFLAGS="-lstdc++ -lm" go build -o seyir ./cmd/seyir
+RUN CGO_ENABLED=1 go build -o seyir ./cmd/seyir
 
 FROM alpine:latest
 
