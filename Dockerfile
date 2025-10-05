@@ -1,4 +1,4 @@
-FROM golang:1.21-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 WORKDIR /app
 COPY go.mod go.sum ./
@@ -23,14 +23,12 @@ RUN mkdir -p /app/data
 # Expose web port
 EXPOSE 8080
 
-# Environment variables with defaults
-ENV PROJECT=""
-ENV LABELS=""
+# Environment variable with default
 ENV PORT="8080"
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:${PORT} || exit 1
 
-# Run seyir service
-CMD ["sh", "-c", "./seyir service --project ${PROJECT} --port ${PORT} --labels \"${LABELS}\""]
+# Run seyir service (simplified - containers opt-in with labels)
+CMD ["sh", "-c", "./seyir service --port ${PORT}"]
