@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  logspot:
+  seyir:
     build: .
     ports:
       - "8080:8080"
@@ -9,7 +9,7 @@ services:
       # Docker socket for container discovery
       - /var/run/docker.sock:/var/run/docker.sock
       # Persistent storage for logs
-      - logspot-data:/app/data
+      - seyir-data:/app/data
     environment:
       # Optional: Web server port
       PORT: ${PORT:-8080}
@@ -22,5 +22,5 @@ services:
       start_period: 40s
 
 volumes:
-  logspot-data:
+  seyir-data:
     driver: local

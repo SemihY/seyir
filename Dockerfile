@@ -5,7 +5,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o logspot ./cmd/logspot
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o seyir ./cmd/seyir
 
 FROM alpine:latest
 
@@ -15,7 +15,7 @@ RUN apk --no-cache add ca-certificates docker-cli
 WORKDIR /app
 
 # Copy the binary
-COPY --from=builder /app/logspot .
+COPY --from=builder /app/seyir .
 
 # Create data directory
 RUN mkdir -p /app/data
@@ -32,5 +32,5 @@ ENV PORT="8080"
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:${PORT} || exit 1
 
-# Run logspot service
-CMD ["sh", "-c", "./logspot service --project ${PROJECT} --port ${PORT} --labels \"${LABELS}\""]
+# Run seyir service
+CMD ["sh", "-c", "./seyir service --project ${PROJECT} --port ${PORT} --labels \"${LABELS}\""]

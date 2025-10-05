@@ -4,12 +4,12 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"logspot/internal/collector"
-	"logspot/internal/db"
-	"logspot/internal/server"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"seyir/internal/collector"
+	"seyir/internal/db"
+	"seyir/internal/server"
 	"strings"
 	"syscall"
 	"time"
@@ -22,18 +22,18 @@ func getDataDir() string {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		// Fallback to current working directory
-		return ".logspot"
+		return ".seyir"
 	}
-	return filepath.Join(homeDir, ".logspot")
+	return filepath.Join(homeDir, ".seyir")
 }
 
 // showUsage displays usage information and examples
 func showUsage() {
-	fmt.Println(`Logspot - Centralized Log Collector & Viewer
+	fmt.Println(`seyir - Centralized Log Collector & Viewer
 
 Usage:
-    logspot <command> [flags]
-    command | logspot                        # Pipe mode
+    seyir <command> [flags]
+    command | seyir                        # Pipe mode
 
 Commands:
     service     Start log collection service (Docker containers + Web UI)
@@ -49,45 +49,45 @@ Flags:`)
 	fmt.Println(`
 Examples:
     # Service mode (auto-discovers containers)
-    logspot service --port 8080
+    seyir service --port 8080
 
     # Web interface only
-    logspot web --port 8080
+    seyir web --port 8080
 
     # Search logs  
-    logspot search --search "error" --limit 50
-    logspot search --search "trace_id=abc123"
-    logspot search --search "*" --limit 10
+    seyir search --search "error" --limit 50
+    seyir search --search "trace_id=abc123"
+    seyir search --search "*" --limit 10
 
     # Pipe logs directly
-    docker logs mycontainer | logspot
-    kubectl logs -f deployment/api | logspot
+    docker logs mycontainer | seyir
+    kubectl logs -f deployment/api | seyir
 
     # Management
-    logspot sessions
+    seyir sessions
 
 Container Setup:
     # Containers opt-in to tracking with labels:
-    docker run -l logspot.enable=true my-app
-    docker run -l logspot.enable=true -l logspot.project=web -l logspot.component=api backend-service
-    logspot cleanup
+    docker run -l seyir.enable=true my-app
+    docker run -l seyir.enable=true -l seyir.project=web -l seyir.component=api backend-service
+    seyir cleanup
 
 Docker Deployment:
     docker run -d \\
       -v /var/run/docker.sock:/var/run/docker.sock \\
-      -v logspot-data:/app/data \\
+      -v seyir-data:/app/data \\
       -p 8080:8080 \\
-      logspot:latest
+      seyir:latest
 
 Architecture:
-    - Auto-discovers containers with 'logspot.enable=true' label
+    - Auto-discovers containers with 'seyir.enable=true' label
     - Containers self-register with optional project/component metadata
     - Parses structured logs (JSON, key-value, timestamps)
     - Stores in compressed Parquet format
     - Provides unified web interface for all logs
     - Fast search across trace IDs, processes, components
 
-Data: ~/.logspot/lake/`)
+Data: ~/.seyir/lake/`)
 }
 
 var (
@@ -272,9 +272,9 @@ func runWebServer(port string) {
 
 // runServiceMode starts both Docker collection and web server
 func runServiceMode(port string) {
-	log.Printf("[INFO] 🚀 Starting Logspot service")
+	log.Printf("[INFO] 🚀 Starting seyir service")
 	log.Printf("[INFO] 🌐 Web interface: http://localhost:%s", port)
-	log.Printf("[INFO] 🔍 Auto-discovering containers with 'logspot.enable=true' label")
+	log.Printf("[INFO] 🔍 Auto-discovering containers with 'seyir.enable=true' label")
 
 	// Create collector manager
 	collectorManager := collector.NewManager()
@@ -304,7 +304,7 @@ func runServiceMode(port string) {
 		serverErrChan <- srv.Start()
 	}()
 
-	log.Printf("[INFO] ✅ Logspot service running. Press Ctrl+C to stop.")
+	log.Printf("[INFO] ✅ seyir service running. Press Ctrl+C to stop.")
 
 	// Handle signals for graceful shutdown
 	sigChan := make(chan os.Signal, 1)
@@ -316,7 +316,7 @@ func runServiceMode(port string) {
 		collectorManager.StopAll()
 		os.Exit(1)
 	case <-sigChan:
-		log.Printf("[INFO] 🛑 Shutting down Logspot service...")
+		log.Printf("[INFO] 🛑 Shutting down seyir service...")
 		collectorManager.StopAll()
 	}
 }

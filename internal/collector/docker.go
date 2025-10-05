@@ -5,8 +5,8 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"logspot/internal/db"
 	"os/exec"
+	"seyir/internal/db"
 	"strings"
 	"sync"
 	"time"
@@ -116,8 +116,8 @@ func (dc *DockerCollector) GetActiveContainers() []string {
 
 // discoverContainers finds Docker containers that opt-in to log tracking
 func (dc *DockerCollector) discoverContainers(ctx context.Context) {
-	// Look for containers with logspot.enable=true label (opt-in)
-	args := []string{"ps", "--filter", "label=logspot.enable=true", "--format", "{{.Names}}\t{{.Label \"logspot.project\"}}\t{{.Label \"logspot.component\"}}"}
+	// Look for containers with seyir.enable=true label (opt-in)
+	args := []string{"ps", "--filter", "label=seyir.enable=true", "--format", "{{.Names}}\t{{.Label \"seyir.project\"}}\t{{.Label \"seyir.component\"}}"}
 	
 	out, err := exec.Command("docker", args...).Output()
 	if err != nil {
@@ -163,7 +163,7 @@ func (dc *DockerCollector) discoverContainers(ctx context.Context) {
 	}
 	
 	if discoveredCount > 0 {
-		log.Printf("[INFO] Discovered %d containers with logspot tracking enabled", discoveredCount)
+		log.Printf("[INFO] Discovered %d containers with seyir tracking enabled", discoveredCount)
 	}
 	
 	// Stop collection for containers that are no longer running

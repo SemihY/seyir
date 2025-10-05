@@ -2,7 +2,7 @@ package retention
 
 import (
 	"log"
-	"logspot/internal/db"
+	"seyir/internal/db"
 	"sync"
 	"time"
 )

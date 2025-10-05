@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
-	"logspot/internal/db"
 	"net/http"
+	"seyir/internal/db"
 	"strconv"
 
 	_ "github.com/marcboeker/go-duckdb/v2"

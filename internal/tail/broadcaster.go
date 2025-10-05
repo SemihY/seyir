@@ -3,8 +3,8 @@ package tail
 import (
 	"encoding/json"
 	"fmt"
-	"logspot/internal/db"
 	"net/http"
+	"seyir/internal/db"
 )
 
 var clients = map[chan string]bool{}

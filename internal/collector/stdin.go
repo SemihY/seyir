@@ -5,9 +5,9 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"logspot/internal/db"
 	"os"
 	"os/signal"
+	"seyir/internal/db"
 	"syscall"
 )
 

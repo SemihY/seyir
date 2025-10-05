@@ -1,4 +1,4 @@
-module logspot
+module seyir
 
 go 1.24
 

@@ -3,8 +3,8 @@ package collector
 import (
 	"context"
 	"log"
-	"logspot/internal/db"
-	"logspot/internal/tail"
+	"seyir/internal/db"
+	"seyir/internal/tail"
 	"strings"
 )
 
