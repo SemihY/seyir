@@ -1,6 +1,6 @@
 # 🪶 seyir
 
-> Lightweight, zero-dependency log viewer that collects and searches local or container logs from multiple sources in real time with DuckLake federation support.
+> Lightweight, zero-dependency log viewer that collects and searches local or container logs from multiple sources in real time
 
 ---
 
@@ -10,11 +10,9 @@
 
 * **🧩 Zero dependencies:** Uses only DuckDB — no external services or databases.
 * **🔍 Instant search:** Simple HTML/JS interface to view and filter logs.
-* **🏗️ Lake Architecture:** Each pipe operation creates its own DuckDB instance, all connected to a unified DuckLake for federated queries.
 * **📦 Multiple operating modes:**
   * **Pipe Mode:** Stream logs directly from any terminal command (`| seyir`).
   * **Container Mode (beta):** Automatically discovers and collects logs from containers.
-* **🌊 DuckLake Federation:** Query across multiple log sources with unified SQL interface.
 * **🗂 Retention:** Background cleaner automatically purges old logs.
 * **💾 DuckDB backend:** Fast analytical queries with minimal resource usage.
 * **🖥 macOS Menubar UI:** Quick access to logs from the system tray.
@@ -41,26 +39,6 @@ curl -fsSL https://get.seyir.sh | bash
 
 ---
 
-## ⚡ Usage
-
-### 1️⃣ Pipe Mode (Lake Architecture)
-
-Each command creates its own DuckDB instance connected to the same DuckLake:
-
-```bash
-# Each pipe creates a new DuckDB instance
-myapp1 | seyir    # Creates DuckDB instance 1 → connects to shared lake
-myapp2 | seyir    # Creates DuckDB instance 2 → connects to shared lake  
-myapp3 | seyir    # Creates DuckDB instance 3 → connects to shared lake
-```
-
-All logs are stored in the unified DuckLake at `~/.seyir/logs.duckdb` for federated querying.
-
-Then open the dashboard in your browser:
-👉 **[http://localhost:7777](http://localhost:7777)**
-
----
-
 ### 2️⃣ Container Mode (Beta)
 
 Run seyir in your Coolify or Docker environment to automatically collect logs from other containers:
@@ -74,29 +52,6 @@ docker run -d \
   -e ENABLE_DOCKER_CAPTURE=true \
   ghcr.io/seyir/seyir:latest
 ```
-
----
-
-## 🌊 DuckLake Architecture
-
-### How It Works
-
-1. **Each Pipe = New DuckDB Instance**: Every `| seyir` command creates a fresh DuckDB process
-2. **Shared Lake Connection**: All instances connect to the same database file (`~/.seyir/logs.duckdb`)
-3. **Federated Queries**: Query across all log sources through the unified lake interface
-4. **Concurrent Safe**: Multiple collectors can write simultaneously to the shared lake
-
-### Example Architecture
-```
-myapp1 | seyir  →  DuckDB Instance A  ┐
-myapp2 | seyir  →  DuckDB Instance B  ├→ Shared DuckLake
-myapp3 | seyir  →  DuckDB Instance C  ┘   (~/.seyir/logs.duckdb)
-                                           ↓
-                                      Web Dashboard
-                                   (federated queries)
-```
-
----
 
 ## 🧰 Development
 
@@ -197,7 +152,6 @@ Visit: 👉 [http://localhost:7777](http://localhost:7777)
 - [ ] **Alerting**: Real-time notifications on error patterns
 - [ ] **Dashboards**: Custom analytics views and metrics
 - [ ] **Export**: Export logs to external systems
-- [ ] **Clustering**: Multi-node DuckLake federation
 
 ---
 
