@@ -28,6 +28,8 @@ type DockerCollector struct {
 type ContainerLogCollector struct {
 	*BaseCollector
 	containerName string
+	project       string
+	component     string
 	cmd          *exec.Cmd
 }
 
@@ -44,6 +46,8 @@ func NewDockerCollector() *DockerCollector {
 		knownContainers: make(map[string]*ContainerLogCollector),
 	}
 }
+
+
 
 // Start begins Docker container discovery and log collection
 func (dc *DockerCollector) Start(ctx context.Context) error {
@@ -110,31 +114,56 @@ func (dc *DockerCollector) GetActiveContainers() []string {
 	return containers
 }
 
-// discoverContainers finds running Docker containers and starts log collection
+// discoverContainers finds Docker containers that opt-in to log tracking
 func (dc *DockerCollector) discoverContainers(ctx context.Context) {
-	out, err := exec.Command("docker", "ps", "--format", "{{.Names}}").Output()
+	// Look for containers with logspot.enable=true label (opt-in)
+	args := []string{"ps", "--filter", "label=logspot.enable=true", "--format", "{{.Names}}\t{{.Label \"logspot.project\"}}\t{{.Label \"logspot.component\"}}"}
+	
+	out, err := exec.Command("docker", args...).Output()
 	if err != nil {
 		log.Printf("[ERROR] Docker discovery failed: %v", err)
 		return
 	}
 
 	currentContainers := make(map[string]bool)
-	containers := strings.Split(strings.TrimSpace(string(out)), "\n")
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 	
-	for _, containerName := range containers {
-		if containerName == "" {
+	discoveredCount := 0
+	for _, line := range lines {
+		if line == "" {
 			continue
 		}
 		
+		parts := strings.Split(line, "\t")
+		if len(parts) < 1 {
+			continue
+		}
+		
+		containerName := parts[0]
+		project := ""
+		component := ""
+		
+		if len(parts) > 1 {
+			project = parts[1]
+		}
+		if len(parts) > 2 {
+			component = parts[2]
+		}
+		
 		currentContainers[containerName] = true
+		discoveredCount++
 		
 		dc.mutex.RLock()
 		_, exists := dc.knownContainers[containerName]
 		dc.mutex.RUnlock()
 		
 		if !exists {
-			dc.startContainerCollection(ctx, containerName)
+			dc.startContainerCollection(ctx, containerName, project, component)
 		}
+	}
+	
+	if discoveredCount > 0 {
+		log.Printf("[INFO] Discovered %d containers with logspot tracking enabled", discoveredCount)
 	}
 	
 	// Stop collection for containers that are no longer running
@@ -150,12 +179,27 @@ func (dc *DockerCollector) discoverContainers(ctx context.Context) {
 }
 
 // startContainerCollection begins log collection for a specific container
-func (dc *DockerCollector) startContainerCollection(ctx context.Context, containerName string) {
-	collector := NewContainerLogCollector(containerName)
+func (dc *DockerCollector) startContainerCollection(ctx context.Context, containerName, project, component string) {
+	// Use container's project label
+	containerProject := project
+	
+	// Create collector with project-aware naming
+	sourceName := containerName
+	if containerProject != "" {
+		sourceName = fmt.Sprintf("%s-%s", containerProject, containerName)
+	}
+	
+	collector := NewContainerLogCollector(sourceName)
 	if collector == nil {
 		log.Printf("[ERROR] Failed to create container collector for %s", containerName)
 		return
 	}
+	
+	// Set the actual container name for docker logs command
+	collector.containerName = containerName
+	// Set project and component for enhanced log parsing
+	collector.project = containerProject
+	collector.component = component
 	
 	dc.mutex.Lock()
 	dc.knownContainers[containerName] = collector
@@ -172,7 +216,8 @@ func (dc *DockerCollector) startContainerCollection(ctx context.Context, contain
 		}
 	}()
 	
-	log.Printf("[INFO] Started collecting logs from container: %s", containerName)
+	log.Printf("[INFO] Started collecting logs from container: %s (project: %s, component: %s)", 
+		containerName, containerProject, component)
 }
 
 // stopAllContainers stops log collection for all monitored containers
@@ -297,15 +342,26 @@ func (clc *ContainerLogCollector) scanLogs(reader interface{ Read([]byte) (int, 
 			var entry *db.LogEntry
 			if parsedData != nil {
 				entry = db.NewLogEntryFromParsed(sourceName, parsedData)
-				// Add container name as process if not already set
+				// Add container metadata if not already set
 				if entry.Process == "" {
 					entry.Process = clc.containerName
+				}
+				if entry.Component == "" && clc.component != "" {
+					entry.Component = clc.component
 				}
 			} else {
 				// Fallback to simple parsing if structured parsing fails
 				level := clc.ParseLogLevel(line)
 				entry = db.NewLogEntry(sourceName, level, line)
 				entry.Process = clc.containerName // Set container as process
+				if clc.component != "" {
+					entry.Component = clc.component
+				}
+			}
+			
+			// Always set project from container metadata if available
+			if clc.project != "" {
+				entry.Source = clc.project // Use project as high-level source grouping
 			}
 			
 			clc.SaveAndBroadcast(entry)

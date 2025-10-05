@@ -29,55 +29,71 @@ func getDataDir() string {
 
 // showUsage displays usage information and examples
 func showUsage() {
-	fmt.Println(`Logspot - Real-time Log Viewer
+	fmt.Println(`Logspot - Centralized Log Collector & Viewer
 
 Usage:
-    logspot [flags]                          # Interactive mode
-    command | logspot                        # Pipe mode (creates session)
-    logspot --search "query"                 # Search mode
-    logspot --sessions                       # Show active sessions
-    logspot --cleanup                        # Cleanup inactive sessions
-    logspot --web                            # Start web server
+    logspot <command> [flags]
+    command | logspot                        # Pipe mode
+
+Commands:
+    service     Start log collection service (Docker containers + Web UI)
+    web         Start web server only 
+    search      Search collected logs
+    sessions    Show active log sessions
+    cleanup     Clean up old log sessions
+    help        Show this help
 
 Flags:`)
 	flag.PrintDefaults()
 	
 	fmt.Println(`
 Examples:
-    # Pipe logs from any command (each creates its own session DB)
-    docker logs myapp | logspot
+    # Service mode (auto-discovers containers)
+    logspot service --port 8080
+
+    # Web interface only
+    logspot web --port 8080
+
+    # Search logs  
+    logspot search --search "error" --limit 50
+    logspot search --search "trace_id=abc123"
+    logspot search --search "*" --limit 10
+
+    # Pipe logs directly
+    docker logs mycontainer | logspot
     kubectl logs -f deployment/api | logspot
-    tail -f /var/log/nginx/access.log | logspot
 
-    # Search across all session databases
-    logspot --search "error" --limit 20      # Search for "error" 
-    logspot --search "*" --limit 10          # Show last 10 logs
-    logspot --search "api" --limit 50        # Search for "api" related logs
+    # Management
+    logspot sessions
 
-    # Start web server for log viewing
-    logspot --web                            # Start on port 8080
-    logspot --web --port 9090                # Start on custom port
+Container Setup:
+    # Containers opt-in to tracking with labels:
+    docker run -l logspot.enable=true my-app
+    docker run -l logspot.enable=true -l logspot.project=web -l logspot.component=api backend-service
+    logspot cleanup
+
+Docker Deployment:
+    docker run -d \\
+      -v /var/run/docker.sock:/var/run/docker.sock \\
+      -v logspot-data:/app/data \\
+      -p 8080:8080 \\
+      logspot:latest
 
 Architecture:
-    - Each pipe operation creates one compressed Parquet file per session
-    - Files stored in ~/.logspot/lake/session_*.parquet (SNAPPY compressed)
-    - Efficient batched writes with immediate persistence
-    - Web dashboard federates queries across all Parquet files
-    - Multiple concurrent sessions supported
-    - Session management and cleanup available
+    - Auto-discovers containers with 'logspot.enable=true' label
+    - Containers self-register with optional project/component metadata
+    - Parses structured logs (JSON, key-value, timestamps)
+    - Stores in compressed Parquet format
+    - Provides unified web interface for all logs
+    - Fast search across trace IDs, processes, components
 
-Lake Directory: ~/.logspot/lake/session_*.parquet`)
+Data: ~/.logspot/lake/`)
 }
 
 var (
-	forceCliMode   = flag.Bool("cli", false, "Force CLI mode even on macOS")
-	searchQuery    = flag.String("search", "", "Search logs in the database (use '*' for all logs)")
-	searchLimit    = flag.Int("limit", 100, "Limit number of search results")
-	showHelp       = flag.Bool("help", false, "Show usage information")
-	showSessions   = flag.Bool("sessions", false, "Show active sessions")
-	cleanupSessions = flag.Bool("cleanup", false, "Cleanup inactive sessions")
-	webServer      = flag.Bool("web", false, "Start web server for log viewing")
-	webPort        = flag.String("port", "8080", "Port for web server")
+	port        = flag.String("port", "8080", "Port for web server")
+	searchQuery = flag.String("search", "", "Search logs (use '*' for all logs)")
+	limit       = flag.Int("limit", 100, "Search result limit")
 )
 
 func main() {
@@ -88,35 +104,41 @@ func main() {
 	lakeDir := filepath.Join(dataDir, "lake")
 	db.SetGlobalLakeDir(lakeDir)
 	
-	if *showHelp {
+	args := flag.Args()
+	
+	// If no command provided, check for pipe mode or show help
+	if len(args) == 0 {
+		if isPipeOperation() {
+			runPipeMode()
+			return
+		}
 		showUsage()
 		return
 	}
-
-	if *showSessions {
+	
+	command := args[0]
+	
+	switch command {
+	case "service":
+		runServiceMode(*port)
+	case "web":
+		runWebServer(*port)
+	case "search":
+		if *searchQuery == "" {
+			fmt.Println("Error: --search flag is required for search command")
+			os.Exit(1)
+		}
+		runSearchMode(*searchQuery, *limit)
+	case "sessions":
 		runShowSessions()
-		return
-	}
-
-	if *cleanupSessions {
+	case "cleanup":
 		runCleanupSessions()
-		return
-	}
-
-	if *searchQuery != "" {
-		runSearchMode(*searchQuery, *searchLimit)
-		return
-	}
-
-	if *webServer {
-		runWebServer(*webPort)
-		return
-	}
-
-	// Check if this is a pipe operation (stdin has data)
-	if isPipeOperation() {
-		runPipeMode()
-		return
+	case "help", "--help", "-h":
+		showUsage()
+	default:
+		fmt.Printf("Unknown command: %s\n\n", command)
+		showUsage()
+		os.Exit(1)
 	}
 }
 
@@ -245,6 +267,57 @@ func runWebServer(port string) {
 	if err := srv.Start(); err != nil {
 		fmt.Printf("Failed to start web server: %v\n", err)
 		os.Exit(1)
+	}
+}
+
+// runServiceMode starts both Docker collection and web server
+func runServiceMode(port string) {
+	log.Printf("[INFO] 🚀 Starting Logspot service")
+	log.Printf("[INFO] 🌐 Web interface: http://localhost:%s", port)
+	log.Printf("[INFO] 🔍 Auto-discovering containers with 'logspot.enable=true' label")
+
+	// Create collector manager
+	collectorManager := collector.NewManager()
+
+	// Create and add Docker collector (no filters needed, uses opt-in labels)
+	dockerCollector := collector.NewDockerCollector()
+	if dockerCollector == nil {
+		fmt.Printf("❌ Failed to create Docker collector\n")
+		os.Exit(1)
+	}
+
+	if err := collectorManager.AddCollector("docker", dockerCollector); err != nil {
+		fmt.Printf("❌ Failed to add Docker collector: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Start collectors
+	if err := collectorManager.StartAll(); err != nil {
+		fmt.Printf("❌ Failed to start collectors: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Start web server in a goroutine
+	serverErrChan := make(chan error, 1)
+	go func() {
+		srv := server.New(port)
+		serverErrChan <- srv.Start()
+	}()
+
+	log.Printf("[INFO] ✅ Logspot service running. Press Ctrl+C to stop.")
+
+	// Handle signals for graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	select {
+	case err := <-serverErrChan:
+		fmt.Printf("❌ Web server failed: %v\n", err)
+		collectorManager.StopAll()
+		os.Exit(1)
+	case <-sigChan:
+		log.Printf("[INFO] 🛑 Shutting down Logspot service...")
+		collectorManager.StopAll()
 	}
 }
 

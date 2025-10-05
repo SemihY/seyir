@@ -98,28 +98,42 @@ help:
 	@echo "   make uninstall     - Remove from system"
 	@echo "   make clean         - Clean build artifacts"
 	@echo "   make run           - Run in development mode"
-	@echo "   make test          - Run with test logs"
-	@echo "   make run-cli       - Force CLI mode (macOS)"
 	@echo "   make deps          - Install Go dependencies"
-	@echo "   make macos-app     - Create macOS .app bundle"
-	@echo "   make help          - Show this help"
 	@echo ""
-	@echo "🎯 Usage after install:"
-	@echo "   tail -f app.log | logspot      # Pipe logs"
-	@echo "   docker logs container | logspot # Docker logs"
-	@echo "   logspot -test                  # Test mode"
-	@echo "   logspot -cli                   # Force CLI on macOS"
+	@echo "🐳 Docker commands:"
+	@echo "   make docker-build  - Build Docker image"  
+	@echo "   make docker-run    - Run with docker-compose"
+	@echo "   make docker-stop   - Stop Docker containers"
+	@echo "   make docker-logs   - Show container logs"
+	@echo ""
+	@echo "🎯 Usage examples:"
+	@echo "   logspot service --project myapp --port 8080"
+	@echo "   logspot web --port 8080"  
+	@echo "   logspot search --search 'error' --limit 50"
+	@echo "   tail -f app.log | logspot"
 	@echo ""
 	@echo "🍎 On macOS: Runs as menubar app by default"
 	@echo "🐧 On Linux/Windows: Runs as CLI app"
 
+# Docker commands
+docker-build:
+	@echo "🐳 Building Docker image..."
+	docker build -t logspot:latest .
+	@echo "✅ Docker image built: logspot:latest"
+
+docker-run: docker-build
+	@echo "� Running logspot in Docker..."
+	docker-compose up -d
+	@echo "✅ Logspot running at http://localhost:8080"
+
+docker-stop:
+	@echo "🛑 Stopping logspot Docker containers..."
+	docker-compose down
+	@echo "✅ Containers stopped"
+
+docker-logs:
+	@echo "📋 Showing logspot container logs..."
+	docker-compose logs -f logspot
+
 # Default target
 .DEFAULT_GOAL := help
-
-release:
-	@echo "🚀 Creating release..."
-	@goreleaser release --rm-dist
-
-brew:
-	@echo "🍺 Creating brew formula..."
-	@goreleaser release --rm-dist --snapshot
