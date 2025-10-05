@@ -4,8 +4,6 @@
 
 ---
 
----
-
 ## 🚀 Features
 
 * **🧩 Zero dependencies:** Uses only DuckDB — no external services or databases.
@@ -123,27 +121,6 @@ Visit: 👉 [http://localhost:7777](http://localhost:7777)
 - **Level Filtering**: Show only ERROR, WARN, INFO, or DEBUG logs
 - **Time Range**: Search within specific time periods
 - **Federated View**: See logs from all connected sources in one interface
-
----
-
-## 🏗️ Architecture Benefits
-
-### Scalability
-- **Horizontal**: Add more pipe sources without affecting existing ones
-- **Isolation**: Each collector runs independently 
-- **Performance**: Parallel ingestion to shared lake
-
-### Reliability  
-- **Fault Tolerance**: One failed collector doesn't affect others
-- **Data Consistency**: Unified lake ensures all logs are queryable
-- **Resource Efficiency**: Each DuckDB instance optimized for its workload
-
-### Developer Experience
-- **Simple Integration**: Just add `| seyir` to any command
-- **Unified View**: All logs searchable in one dashboard
-- **Zero Config**: Works out of the box with sensible defaults
-
----
 
 ## 🛣️ Roadmap
 
