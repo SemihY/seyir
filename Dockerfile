@@ -1,11 +1,14 @@
 FROM golang:1.24-alpine AS builder
 
+# Install build dependencies for DuckDB
+RUN apk add --no-cache gcc g++ musl-dev
+
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o seyir ./cmd/seyir
+RUN CGO_ENABLED=1 GOOS=linux go build -a -o seyir ./cmd/seyir
 
 FROM alpine:latest
 
