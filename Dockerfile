@@ -1,14 +1,25 @@
-FROM golang:1.24-alpine AS builder
+FROM golang:1.24-bullseye AS builder
 
-# Install build dependencies for DuckDB
-RUN apk add --no-cache gcc g++ musl-dev
+# Install dependencies for building
+RUN apt-get update && apt-get install -y \
+    gcc \
+    libc6-dev \
+    libsqlite3-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+
+# Copy go mod files
 COPY go.mod go.sum ./
+
+# Download dependencies
 RUN go mod download
 
+# Copy source code
 COPY . .
-RUN CGO_ENABLED=1 GOOS=linux go build -a -o seyir ./cmd/seyir
+
+# Build the application with simpler flags
+RUN CGO_ENABLED=1 go build -o seyir ./cmd/seyir
 
 FROM alpine:latest
 
