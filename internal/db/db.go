@@ -110,14 +110,21 @@ func NewSessionConnection() (*DB, error) {
 		lastFlush:      now,
 	}
 
-	// Create temporary table for this session
+	// Create temporary table for this session with extended schema
 	_, err = dbWrapper.Exec(`
 		CREATE TABLE logs (
 			ts TIMESTAMP NOT NULL,
 			source TEXT NOT NULL,
 			level TEXT NOT NULL,
 			message TEXT NOT NULL,
-			id TEXT NOT NULL
+			id TEXT NOT NULL,
+			trace_id TEXT,
+			process TEXT,
+			component TEXT,
+			thread TEXT,
+			user_id TEXT,
+			request_id TEXT,
+			tags TEXT[] -- Array for tags
 		)
 	`)
 	if err != nil {
@@ -173,14 +180,21 @@ func (db *DB) EnsureSchema() error {
 		return nil
 	}
 	
-	// For regular InitDB connections, create the logs table
+	// For regular InitDB connections, create the logs table with extended schema
 	_, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS logs (
 			ts TIMESTAMP NOT NULL,
 			source TEXT NOT NULL,
 			level TEXT NOT NULL,
 			message TEXT NOT NULL,
-			id TEXT NOT NULL
+			id TEXT NOT NULL,
+			trace_id TEXT,
+			process TEXT,
+			component TEXT,
+			thread TEXT,
+			user_id TEXT,
+			request_id TEXT,
+			tags TEXT[] -- Array for tags
 		)
 	`)
 	if err != nil {
@@ -207,9 +221,21 @@ func (db *DB) HealthCheck() error {
 	return nil
 }
 
+// convertTagsToArray converts a string slice to a format DuckDB can handle
+func convertTagsToArray(tags []string) interface{} {
+	if len(tags) == 0 {
+		return nil
+	}
+	return tags
+}
+
 func SaveLog(db *DB, e *LogEntry) {
-	// Insert into in-memory table
-	_, err := db.Exec(`INSERT INTO logs VALUES (?, ?, ?, ?, ?)`, e.Ts, e.Source, e.Level, e.Message, e.ID)
+	// Convert tags slice for DuckDB
+	tagsArray := convertTagsToArray(e.Tags)
+	
+	// Insert into in-memory table with extended fields
+	_, err := db.Exec(`INSERT INTO logs (ts, source, level, message, id, trace_id, process, component, thread, user_id, request_id, tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, 
+		e.Ts, e.Source, e.Level, e.Message, e.ID, e.TraceID, e.Process, e.Component, e.Thread, e.UserID, e.RequestID, tagsArray)
 	if err != nil { 
 		log.Printf("[ERROR] failed to save log to memory: %v", err) 
 	}
@@ -224,8 +250,12 @@ func (db *DB) SaveLogDirectly(e *LogEntry) error {
 	// Update last activity time
 	db.lastActivity = time.Now()
 	
-	// Insert into in-memory table first
-	_, err := db.Exec(`INSERT INTO logs VALUES (?, ?, ?, ?, ?)`, e.Ts, e.Source, e.Level, e.Message, e.ID)
+	// Convert tags slice for DuckDB
+	tagsArray := convertTagsToArray(e.Tags)
+	
+	// Insert into in-memory table first with extended fields
+	_, err := db.Exec(`INSERT INTO logs (ts, source, level, message, id, trace_id, process, component, thread, user_id, request_id, tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, 
+		e.Ts, e.Source, e.Level, e.Message, e.ID, e.TraceID, e.Process, e.Component, e.Thread, e.UserID, e.RequestID, tagsArray)
 	if err != nil {
 		return fmt.Errorf("failed to insert into memory table: %v", err)
 	}
@@ -358,6 +388,30 @@ func (db *DB) ClearMemoryTable() error {
 	return nil
 }
 
+// detectParquetSchema checks what columns are available in the Parquet files
+func detectParquetSchema(db *sql.DB, parquetPattern string) (bool, error) {
+	// Try to describe the structure of one parquet file to see what columns are available
+	testSQL := fmt.Sprintf("DESCRIBE SELECT * FROM read_parquet('%s') LIMIT 1", parquetPattern)
+	rows, err := db.Query(testSQL)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	
+	hasExtendedColumns := false
+	for rows.Next() {
+		var columnName, columnType, nullable interface{}
+		if err := rows.Scan(&columnName, &columnType, &nullable); err == nil {
+			if colName, ok := columnName.(string); ok && colName == "trace_id" {
+				hasExtendedColumns = true
+				break
+			}
+		}
+	}
+	
+	return hasExtendedColumns, nil
+}
+
 func SearchLogs(query string, limit int) ([]*LogEntry, error) {
 	lakeDirMutex.RLock()
 	lakeDir := globalLakeDir
@@ -377,12 +431,35 @@ func SearchLogs(query string, limit int) ([]*LogEntry, error) {
 	// Find all session Parquet files in the lake directory
 	parquetPattern := filepath.Join(lakeDir, "session_*.parquet")
 	
-	// Create a query that reads from all Parquet files using glob pattern
-	baseSQL := fmt.Sprintf(`
-		SELECT ts, source, level, message, id 
-		FROM read_parquet('%s')`, parquetPattern)
+	// Check if no parquet files exist yet
+	matches, globErr := filepath.Glob(parquetPattern)
+	if globErr == nil && len(matches) == 0 {
+		log.Printf("[INFO] No Parquet files found in lake directory")
+		return []*LogEntry{}, nil
+	}
 	
 	log.Printf("[INFO] Searching Parquet files with pattern: %s", parquetPattern)
+
+	// Detect if the parquet files have the extended schema
+	hasExtendedColumns, schemaErr := detectParquetSchema(db, parquetPattern)
+	if schemaErr != nil {
+		// Fallback to old schema if detection fails
+		hasExtendedColumns = false
+		log.Printf("[WARN] Could not detect parquet schema, assuming old format: %v", schemaErr)
+	}
+
+	var baseSQL string
+	if hasExtendedColumns {
+		// Use extended schema
+		baseSQL = fmt.Sprintf(`
+			SELECT ts, source, level, message, id, trace_id, process, component, thread, user_id, request_id, tags
+			FROM read_parquet('%s')`, parquetPattern)
+	} else {
+		// Use old schema with default values for missing fields
+		baseSQL = fmt.Sprintf(`
+			SELECT ts, source, level, message, id, '' as trace_id, '' as process, '' as component, '' as thread, '' as user_id, '' as request_id, [] as tags
+			FROM read_parquet('%s')`, parquetPattern)
+	}
 
 	var rows *sql.Rows
 	if query == "*" {
@@ -390,18 +467,20 @@ func SearchLogs(query string, limit int) ([]*LogEntry, error) {
 		fullSQL := baseSQL + ` ORDER BY ts DESC LIMIT ?`
 		rows, err = db.Query(fullSQL, limit)
 	} else {
-		// Search with filter using parameterized queries
-		fullSQL := baseSQL + ` WHERE message LIKE ? OR source LIKE ? ORDER BY ts DESC LIMIT ?`
-		queryPattern := "%" + query + "%"
-		rows, err = db.Query(fullSQL, queryPattern, queryPattern, limit)
+		// Search with filter - adjust based on schema
+		if hasExtendedColumns {
+			// Search across all fields including new ones
+			fullSQL := baseSQL + ` WHERE message LIKE ? OR source LIKE ? OR trace_id LIKE ? OR process LIKE ? OR component LIKE ? ORDER BY ts DESC LIMIT ?`
+			queryPattern := "%" + query + "%"
+			rows, err = db.Query(fullSQL, queryPattern, queryPattern, queryPattern, queryPattern, queryPattern, limit)
+		} else {
+			// Search only in old fields
+			fullSQL := baseSQL + ` WHERE message LIKE ? OR source LIKE ? ORDER BY ts DESC LIMIT ?`
+			queryPattern := "%" + query + "%"
+			rows, err = db.Query(fullSQL, queryPattern, queryPattern, limit)
+		}
 	}
 	if err != nil {
-		// Check if no parquet files exist yet
-		matches, globErr := filepath.Glob(parquetPattern)
-		if globErr == nil && len(matches) == 0 {
-			log.Printf("[INFO] No Parquet files found in lake directory")
-			return []*LogEntry{}, nil
-		}
 		return nil, fmt.Errorf("failed to query parquet files: %v", err)
 	}
 	defer rows.Close()
@@ -409,9 +488,18 @@ func SearchLogs(query string, limit int) ([]*LogEntry, error) {
 	var results []*LogEntry
 	for rows.Next() {
 		var e LogEntry
-		if err := rows.Scan(&e.Ts, &e.Source, &e.Level, &e.Message, &e.ID); err != nil {
+		var tagsArray interface{}
+		if err := rows.Scan(&e.Ts, &e.Source, &e.Level, &e.Message, &e.ID, &e.TraceID, &e.Process, &e.Component, &e.Thread, &e.UserID, &e.RequestID, &tagsArray); err != nil {
 			return nil, err
 		}
+		
+		// Convert tags array back to string slice
+		if tagsArray != nil {
+			if tags, ok := tagsArray.([]string); ok {
+				e.Tags = tags
+			}
+		}
+		
 		results = append(results, &e)
 	}
 	if err := rows.Err(); err != nil {
@@ -441,6 +529,19 @@ func CountLogs(query string) (int, error) {
 	// Find all session Parquet files in the lake directory
 	parquetPattern := filepath.Join(lakeDir, "session_*.parquet")
 	
+	// Check if no parquet files exist yet
+	matches, globErr := filepath.Glob(parquetPattern)
+	if globErr == nil && len(matches) == 0 {
+		return 0, nil
+	}
+	
+	// Detect if the parquet files have the extended schema
+	hasExtendedColumns, schemaErr := detectParquetSchema(db, parquetPattern)
+	if schemaErr != nil {
+		hasExtendedColumns = false
+		log.Printf("[WARN] Could not detect parquet schema for count, assuming old format: %v", schemaErr)
+	}
+	
 	// Create a query that counts rows from all Parquet files using glob pattern
 	baseSQL := fmt.Sprintf(`
 		SELECT COUNT(*) 
@@ -451,19 +552,22 @@ func CountLogs(query string) (int, error) {
 		// Count all logs
 		row = db.QueryRow(baseSQL)
 	} else {
-		// Count with filter
-		fullSQL := baseSQL + ` WHERE message LIKE ? OR source LIKE ?`
-		queryPattern := "%" + query + "%"
-		row = db.QueryRow(fullSQL, queryPattern, queryPattern)
+		// Count with filter - adjust based on schema
+		if hasExtendedColumns {
+			// Search across all fields including new ones
+			fullSQL := baseSQL + ` WHERE message LIKE ? OR source LIKE ? OR trace_id LIKE ? OR process LIKE ? OR component LIKE ?`
+			queryPattern := "%" + query + "%"
+			row = db.QueryRow(fullSQL, queryPattern, queryPattern, queryPattern, queryPattern, queryPattern)
+		} else {
+			// Search only in old fields
+			fullSQL := baseSQL + ` WHERE message LIKE ? OR source LIKE ?`
+			queryPattern := "%" + query + "%"
+			row = db.QueryRow(fullSQL, queryPattern, queryPattern)
+		}
 	}
 	
 	var count int
 	if err := row.Scan(&count); err != nil {
-		// Check if no parquet files exist yet
-		matches, globErr := filepath.Glob(parquetPattern)
-		if globErr == nil && len(matches) == 0 {
-			return 0, nil
-		}
 		return 0, fmt.Errorf("failed to count logs: %v", err)
 	}
 	
@@ -490,10 +594,31 @@ func SearchLogsWithPagination(query string, limit int, offset int) ([]*LogEntry,
 	// Find all session Parquet files in the lake directory
 	parquetPattern := filepath.Join(lakeDir, "session_*.parquet")
 	
-	// Create a query that reads from all Parquet files using glob pattern
-	baseSQL := fmt.Sprintf(`
-		SELECT ts, source, level, message, id 
-		FROM read_parquet('%s')`, parquetPattern)
+	// Check if no parquet files exist yet
+	matches, globErr := filepath.Glob(parquetPattern)
+	if globErr == nil && len(matches) == 0 {
+		return []*LogEntry{}, nil
+	}
+	
+	// Detect if the parquet files have the extended schema
+	hasExtendedColumns, schemaErr := detectParquetSchema(db, parquetPattern)
+	if schemaErr != nil {
+		hasExtendedColumns = false
+		log.Printf("[WARN] Could not detect parquet schema for pagination, assuming old format: %v", schemaErr)
+	}
+
+	var baseSQL string
+	if hasExtendedColumns {
+		// Use extended schema
+		baseSQL = fmt.Sprintf(`
+			SELECT ts, source, level, message, id, trace_id, process, component, thread, user_id, request_id, tags
+			FROM read_parquet('%s')`, parquetPattern)
+	} else {
+		// Use old schema with default values for missing fields
+		baseSQL = fmt.Sprintf(`
+			SELECT ts, source, level, message, id, '' as trace_id, '' as process, '' as component, '' as thread, '' as user_id, '' as request_id, [] as tags
+			FROM read_parquet('%s')`, parquetPattern)
+	}
 	
 	var rows *sql.Rows
 	if query == "*" {
@@ -501,17 +626,20 @@ func SearchLogsWithPagination(query string, limit int, offset int) ([]*LogEntry,
 		fullSQL := baseSQL + ` ORDER BY ts DESC LIMIT ? OFFSET ?`
 		rows, err = db.Query(fullSQL, limit, offset)
 	} else {
-		// Search with filter and pagination
-		fullSQL := baseSQL + ` WHERE message LIKE ? OR source LIKE ? ORDER BY ts DESC LIMIT ? OFFSET ?`
-		queryPattern := "%" + query + "%"
-		rows, err = db.Query(fullSQL, queryPattern, queryPattern, limit, offset)
+		// Search with filter and pagination - adjust based on schema
+		if hasExtendedColumns {
+			// Search across all fields including new ones
+			fullSQL := baseSQL + ` WHERE message LIKE ? OR source LIKE ? OR trace_id LIKE ? OR process LIKE ? OR component LIKE ? ORDER BY ts DESC LIMIT ? OFFSET ?`
+			queryPattern := "%" + query + "%"
+			rows, err = db.Query(fullSQL, queryPattern, queryPattern, queryPattern, queryPattern, queryPattern, limit, offset)
+		} else {
+			// Search only in old fields
+			fullSQL := baseSQL + ` WHERE message LIKE ? OR source LIKE ? ORDER BY ts DESC LIMIT ? OFFSET ?`
+			queryPattern := "%" + query + "%"
+			rows, err = db.Query(fullSQL, queryPattern, queryPattern, limit, offset)
+		}
 	}
 	if err != nil {
-		// Check if no parquet files exist yet
-		matches, globErr := filepath.Glob(parquetPattern)
-		if globErr == nil && len(matches) == 0 {
-			return []*LogEntry{}, nil
-		}
 		return nil, fmt.Errorf("failed to query parquet files: %v", err)
 	}
 	defer rows.Close()
@@ -519,9 +647,18 @@ func SearchLogsWithPagination(query string, limit int, offset int) ([]*LogEntry,
 	var results []*LogEntry
 	for rows.Next() {
 		var e LogEntry
-		if err := rows.Scan(&e.Ts, &e.Source, &e.Level, &e.Message, &e.ID); err != nil {
+		var tagsArray interface{}
+		if err := rows.Scan(&e.Ts, &e.Source, &e.Level, &e.Message, &e.ID, &e.TraceID, &e.Process, &e.Component, &e.Thread, &e.UserID, &e.RequestID, &tagsArray); err != nil {
 			return nil, err
 		}
+		
+		// Convert tags array back to string slice
+		if tagsArray != nil {
+			if tags, ok := tagsArray.([]string); ok {
+				e.Tags = tags
+			}
+		}
+		
 		results = append(results, &e)
 	}
 	

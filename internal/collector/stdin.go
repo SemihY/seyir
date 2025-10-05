@@ -84,11 +84,19 @@ func (sc *StdinCollector) Start(ctx context.Context) error {
 				// Output the line to stdout (passthrough)
 				fmt.Println(line)
 				
-				// Parse log level from message
-				level := sc.ParseLogLevel(line)
+				// Parse structured data from the log line
+				parsedData := db.ParseLogLine(line)
 				
-				// Create and save log entry
-				entry := db.NewLogEntry(sc.sourceName, level, line)
+				// Create enhanced log entry from parsed data
+				var entry *db.LogEntry
+				if parsedData != nil {
+					entry = db.NewLogEntryFromParsed(sc.sourceName, parsedData)
+				} else {
+					// Fallback to simple parsing if structured parsing fails
+					level := sc.ParseLogLevel(line)
+					entry = db.NewLogEntry(sc.sourceName, level, line)
+				}
+				
 				sc.SaveAndBroadcast(entry)
 			}
 		}

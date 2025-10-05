@@ -27,8 +27,6 @@ install-user: build
 	@mkdir -p ~/.logspot
 	@echo "Installing logspot to ~/bin..."
 	cp ./bin/logspot ~/bin/
-	@echo "Installing UI files to ~/.logspot/..."
-	cp -r ./ui ~/.logspot/ui
 	@echo "Installation complete. Make sure ~/bin is in your PATH."
 	@echo "You can add this to your ~/.zshrc: export PATH=\"\$$HOME/bin:\$$PATH\""
 

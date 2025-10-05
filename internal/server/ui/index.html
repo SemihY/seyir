@@ -315,6 +315,65 @@
       color: var(--log-error-text);
     }
 
+    /* Structured Data Styles */
+    .trace-id-code {
+      background: #f1f5f9;
+      padding: 0.125rem 0.375rem;
+      border-radius: 0.25rem;
+      font-family: 'Monaco', 'Consolas', 'Courier New', monospace;
+      font-size: 0.8rem;
+      color: #475569;
+    }
+
+    .details-btn {
+      background: #3b82f6;
+      color: white;
+      border: none;
+      border-radius: 0.25rem;
+      padding: 0.25rem 0.5rem;
+      cursor: pointer;
+      font-size: 0.75rem;
+      transition: background-color 0.2s;
+    }
+
+    .details-btn:hover {
+      background: #2563eb;
+    }
+
+    .details-row {
+      background: #f8fafc;
+      border-left: 4px solid #3b82f6;
+    }
+
+    .details-row.hidden {
+      display: none;
+    }
+
+    .details-content {
+      padding: 1rem;
+    }
+
+    .structured-data {
+      font-size: 0.875rem;
+      line-height: 1.5;
+    }
+
+    .structured-data strong {
+      color: #374151;
+      font-weight: 600;
+    }
+
+    .tag {
+      display: inline-block;
+      background: #e0e7ff;
+      color: #3730a3;
+      padding: 0.125rem 0.5rem;
+      border-radius: 1rem;
+      font-size: 0.75rem;
+      font-weight: 500;
+      margin-right: 0.25rem;
+    }
+
     /* Pagination */
     .pagination {
       display: flex;
@@ -516,7 +575,7 @@
               <path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
             </svg>
           </div>
-          <input id="search" class="search-input" placeholder="Log mesajlarında arama yapın..." type="search">
+          <input id="search" class="search-input" placeholder="Log araması yapın (mesaj, kaynak, trace ID, işlem, bileşen)..." type="search">
         </div>
       </div>
 
@@ -558,11 +617,14 @@
               <th style="width: 100px;">Seviye</th>
               <th>Mesaj</th>
               <th style="width: 120px;">Kaynak</th>
+              <th style="width: 120px;">İşlem</th>
+              <th style="width: 120px;">Trace ID</th>
+              <th style="width: 50px;">Detay</th>
             </tr>
           </thead>
           <tbody id="logContainer">
             <tr>
-              <td colspan="4" class="empty-state">
+              <td colspan="7" class="empty-state">
                 <div class="empty-state-icon">
                   <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>

@@ -154,7 +154,7 @@ class LogViewer {
 
     if (!data.logs || data.logs.length === 0) {
       this.logContainer.innerHTML =
-        '<tr><td colspan="4" class="status">Log bulunamadı</td></tr>';
+        '<tr><td colspan="7" class="status">Log bulunamadı</td></tr>';
     } else {
       data.logs.forEach((log) => {
         const logElement = this.createLogElement(log);
@@ -174,6 +174,12 @@ class LogViewer {
     // Determine log level class
     const levelLower = (log.level || "INFO").toLowerCase();
 
+    // Generate unique ID for collapsible details
+    const detailId = `detail_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    // Check if we have additional structured data
+    const hasStructuredData = log.trace_id || log.process || log.component || log.thread || log.user_id || log.request_id || (log.tags && log.tags.length > 0);
+
     tr.innerHTML = `
       <td class="timestamp">${timestamp}</td>
       <td>
@@ -183,7 +189,42 @@ class LogViewer {
       </td>
       <td class="message">${this.escapeHtml(log.message || "")}</td>
       <td class="source">${this.escapeHtml(log.source || "unknown")}</td>
+      <td class="process">${this.escapeHtml(log.process || "-")}</td>
+      <td class="trace-id">
+        ${log.trace_id ? `<code class="trace-id-code">${this.escapeHtml(log.trace_id)}</code>` : "-"}
+      </td>
+      <td class="details-toggle">
+        ${hasStructuredData ? `<button onclick="toggleDetails('${detailId}')" class="details-btn">📋</button>` : "-"}
+      </td>
     `;
+
+    // Add structured data details row if available
+    if (hasStructuredData) {
+      const detailsRow = document.createElement("tr");
+      detailsRow.id = detailId;
+      detailsRow.className = "details-row hidden";
+      
+      const structuredFields = [];
+      if (log.component) structuredFields.push(`<strong>Bileşen:</strong> ${this.escapeHtml(log.component)}`);
+      if (log.thread) structuredFields.push(`<strong>Thread:</strong> ${this.escapeHtml(log.thread)}`);
+      if (log.user_id) structuredFields.push(`<strong>Kullanıcı ID:</strong> ${this.escapeHtml(log.user_id)}`);
+      if (log.request_id) structuredFields.push(`<strong>İstek ID:</strong> <code>${this.escapeHtml(log.request_id)}</code>`);
+      if (log.tags && log.tags.length > 0) {
+        const tagsHtml = log.tags.map(tag => `<span class="tag">${this.escapeHtml(tag)}</span>`).join(' ');
+        structuredFields.push(`<strong>Etiketler:</strong> ${tagsHtml}`);
+      }
+      
+      detailsRow.innerHTML = `
+        <td colspan="7" class="details-content">
+          <div class="structured-data">
+            ${structuredFields.join('<br>')}
+          </div>
+        </td>
+      `;
+      
+      // Insert details row after the main row
+      tr.after(detailsRow);
+    }
 
     return tr;
   }
@@ -233,6 +274,14 @@ class LogViewer {
     const div = document.createElement("div");
     div.textContent = text;
     return div.innerHTML;
+  }
+}
+
+// Toggle details function for structured data
+function toggleDetails(detailId) {
+  const detailsRow = document.getElementById(detailId);
+  if (detailsRow) {
+    detailsRow.classList.toggle('hidden');
   }
 }
 

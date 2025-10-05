@@ -284,8 +284,8 @@ func (clc *ContainerLogCollector) scanLogs(reader interface{ Read([]byte) (int, 
 				continue
 			}
 			
-			// Parse log level from message
-			level := clc.ParseLogLevel(line)
+			// Parse structured data from the log line
+			parsedData := db.ParseLogLine(line)
 			
 			// Create source name with stream type if it's stderr
 			sourceName := clc.containerName
@@ -293,8 +293,21 @@ func (clc *ContainerLogCollector) scanLogs(reader interface{ Read([]byte) (int, 
 				sourceName = fmt.Sprintf("%s[stderr]", clc.containerName)
 			}
 			
-			// Create and save log entry
-			entry := db.NewLogEntry(sourceName, level, line)
+			// Create enhanced log entry from parsed data
+			var entry *db.LogEntry
+			if parsedData != nil {
+				entry = db.NewLogEntryFromParsed(sourceName, parsedData)
+				// Add container name as process if not already set
+				if entry.Process == "" {
+					entry.Process = clc.containerName
+				}
+			} else {
+				// Fallback to simple parsing if structured parsing fails
+				level := clc.ParseLogLevel(line)
+				entry = db.NewLogEntry(sourceName, level, line)
+				entry.Process = clc.containerName // Set container as process
+			}
+			
 			clc.SaveAndBroadcast(entry)
 		}
 	}

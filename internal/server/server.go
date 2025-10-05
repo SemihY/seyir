@@ -1,8 +1,10 @@
 package server
 
 import (
+	"embed"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"logspot/internal/db"
 	"net/http"
 	"strconv"
@@ -20,6 +22,10 @@ type LogsResponse struct {
 	HasPrevious bool           `json:"hasPrevious"`
 }
 
+
+//go:embed ui/*
+var uiFiles embed.FS
+
 // Server represents the web server instance
 type Server struct {
 	port string
@@ -27,7 +33,9 @@ type Server struct {
 
 // New creates a new server instance
 func New(port string) *Server {
-	return &Server{port: port}
+	return &Server{
+		port: port,
+	}
 }
 
 // Start starts the web server
@@ -35,8 +43,12 @@ func (s *Server) Start() error {
 	fmt.Printf("Starting web server on port %s\n", s.port)
 	fmt.Printf("Access at: http://localhost:%s\n", s.port)
 	
-	// Serve static files from ui/ directory
-	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("ui/"))))
+	// Serve static files from embedded UI files
+	uiFS, err := fs.Sub(uiFiles, "ui")
+	if err != nil {
+		return fmt.Errorf("failed to create UI filesystem: %v", err)
+	}
+	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(uiFS))))
 	
 	// Serve main HTML page
 	http.HandleFunc("/", s.serveHomePage)
@@ -51,9 +63,16 @@ func (s *Server) Start() error {
 	return http.ListenAndServe(":"+s.port, nil)
 }
 
-// serveHomePage serves the main HTML page from ui/index.html
+// serveHomePage serves the main HTML page from embedded files
 func (s *Server) serveHomePage(w http.ResponseWriter, r *http.Request) {
-	http.ServeFile(w, r, "ui/index.html")
+	indexHTML, err := fs.ReadFile(uiFiles, "ui/index.html")
+	if err != nil {
+		http.Error(w, "Failed to read index.html", http.StatusInternalServerError)
+		return
+	}
+	
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write(indexHTML)
 }
 
 // serveLogsAPI handles the /api/logs endpoint with pagination
