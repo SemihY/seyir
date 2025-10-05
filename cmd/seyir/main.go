@@ -91,7 +91,7 @@ Data: ~/.seyir/lake/`)
 }
 
 var (
-	port        = flag.String("port", "8080", "Port for web server")
+	port        = flag.String("port", "5555", "Port for web server")
 	searchQuery = flag.String("search", "", "Search logs (use '*' for all logs)")
 	limit       = flag.Int("limit", 100, "Search result limit")
 )
