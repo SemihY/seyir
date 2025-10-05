@@ -32,7 +32,7 @@ func showUsage() {
 	fmt.Println(`seyir - Centralized Log Collector & Viewer
 
 Usage:
-    seyir <command> [flags]
+    seyir [flags] <command>
     command | seyir                        # Pipe mode
 
 Commands:
@@ -49,15 +49,15 @@ Flags:`)
 	fmt.Println(`
 Examples:
     # Service mode (auto-discovers containers)
-    seyir service --port 8080
+    seyir --port 8080 service
 
     # Web interface only
-    seyir web --port 8080
+    seyir --port 8080 web
 
     # Search logs  
-    seyir search --search "error" --limit 50
-    seyir search --search "trace_id=abc123"
-    seyir search --search "*" --limit 10
+    seyir --search "error" --limit 50 search
+    seyir --search "trace_id=abc123" search
+    seyir --search "*" --limit 10 search
 
     # Pipe logs directly
     docker logs mycontainer | seyir
@@ -275,6 +275,7 @@ func runServiceMode(port string) {
 	log.Printf("[INFO] 🚀 Starting seyir service")
 	log.Printf("[INFO] 🌐 Web interface: http://localhost:%s", port)
 	log.Printf("[INFO] 🔍 Auto-discovering containers with 'seyir.enable=true' label")
+	log.Printf("[DEBUG] Received port parameter: %s", port)
 
 	// Create collector manager
 	collectorManager := collector.NewManager()
