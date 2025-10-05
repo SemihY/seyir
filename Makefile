@@ -18,7 +18,6 @@ install: build
 	sudo cp ./bin/logspot /usr/local/bin/
 	@echo "Installing UI files to /usr/local/share/logspot/..."
 	sudo mkdir -p /usr/local/share/logspot
-	sudo cp -r ./ui /usr/local/share/logspot/ui
 	@echo "Installation complete. You can now use 'logspot' from anywhere."
 
 # Install to user's local bin directory  
