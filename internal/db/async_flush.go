@@ -22,6 +22,7 @@ type AsyncFlushManager struct {
 	emergencyBuffer  *EmergencyBuffer
 	signalHandlerSet bool
 	mutex            sync.Mutex
+	isShutdown       bool
 	
 	// Statistics
 	totalFlushes    int64
@@ -409,7 +410,16 @@ type AsyncFlushStats struct {
 
 // Shutdown gracefully shuts down the async flush manager
 func (afm *AsyncFlushManager) Shutdown() {
+	afm.mutex.Lock()
+	defer afm.mutex.Unlock()
+	
+	if afm.isShutdown {
+		log.Printf("[INFO] Async flush manager already shutdown, skipping...")
+		return
+	}
+	
 	log.Printf("[INFO] Shutting down async flush manager...")
+	afm.isShutdown = true
 	
 	// Close the flush queue
 	close(afm.flushQueue)
