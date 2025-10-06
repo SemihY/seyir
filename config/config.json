@@ -1,0 +1,32 @@
+{
+  "batch_buffer": {
+    "flush_interval_seconds": 5,
+    "batch_size": 10000,
+    "max_memory_mb": 100,
+    "enable_async": true,
+    "worker_count": 3
+  },
+  "file_rotation": {
+    "max_file_size_mb": 50,
+    "max_files": 10,
+    "compression": "snappy"
+  },
+  "retention": {
+    "enabled": true,
+    "retention_days": 30,
+    "cleanup_hours": 1,
+    "max_files_per_scan": 1000,
+    "dry_run": false,
+    "keep_min_files": 5,
+    "max_total_size_gb": 10.0
+  },
+  "process_dirs": {
+    "use_process_name": true,
+    "base_path": "logs"
+  },
+  "server": {
+    "port": "5555",
+    "enable_cors": true,
+    "enable_debug": false
+  }
+}

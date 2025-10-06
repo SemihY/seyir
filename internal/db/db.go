@@ -32,6 +32,7 @@ type DB struct {
 	processInfo    string    // Information about the process using this session
 	pendingEntries int       // Number of entries waiting to be flushed
 	lastFlush      time.Time // Last time data was flushed to Parquet
+	batchBuffer    *BatchBuffer // Batch buffer for this session
 }
 
 // SetGlobalLakeDir sets the global lake directory where all session DBs are stored
@@ -109,6 +110,10 @@ func NewSessionConnection() (*DB, error) {
 		pendingEntries: 0,
 		lastFlush:      now,
 	}
+
+	// Initialize batch buffer with default configuration
+	batchConfig := DefaultBatchConfig()
+	dbWrapper.batchBuffer = NewBatchBuffer(dbWrapper, batchConfig)
 
 	// Create temporary table for this session with extended schema
 	_, err = dbWrapper.Exec(`
@@ -230,6 +235,20 @@ func convertTagsToArray(tags []string) interface{} {
 }
 
 func SaveLog(db *DB, e *LogEntry) {
+	// Use batch buffer if available, otherwise fall back to direct save
+	if db.batchBuffer != nil {
+		if err := db.batchBuffer.Add(e); err != nil {
+			log.Printf("[ERROR] failed to add log to batch buffer: %v", err)
+			// Fall back to direct save on error
+			saveLogDirect(db, e)
+		}
+	} else {
+		saveLogDirect(db, e)
+	}
+}
+
+// saveLogDirect saves log directly to the in-memory table (fallback method)
+func saveLogDirect(db *DB, e *LogEntry) {
 	// Convert tags slice for DuckDB
 	tagsArray := convertTagsToArray(e.Tags)
 	
@@ -241,7 +260,7 @@ func SaveLog(db *DB, e *LogEntry) {
 	}
 }
 
-// SaveLogDirectly saves a log entry, batching writes for efficiency
+// SaveLogDirectly saves a log entry using the batch buffer for efficiency
 func (db *DB) SaveLogDirectly(e *LogEntry) error {
 	if db.sessionID == "" {
 		return fmt.Errorf("no session ID set for this database")
@@ -250,6 +269,17 @@ func (db *DB) SaveLogDirectly(e *LogEntry) error {
 	// Update last activity time
 	db.lastActivity = time.Now()
 	
+	// Use batch buffer if available
+	if db.batchBuffer != nil {
+		return db.batchBuffer.Add(e)
+	}
+	
+	// Fall back to old method if batch buffer is not available
+	return db.saveLogDirectlyLegacy(e)
+}
+
+// saveLogDirectlyLegacy is the old direct save method (kept for backward compatibility)
+func (db *DB) saveLogDirectlyLegacy(e *LogEntry) error {
 	// Convert tags slice for DuckDB
 	tagsArray := convertTagsToArray(e.Tags)
 	
@@ -718,14 +748,20 @@ func CleanupInactiveSessions(maxInactiveTime time.Duration) int {
 
 // CloseSession closes a specific session and removes it from tracking
 func (db *DB) CloseSession() error {
-	// Always flush any remaining data before closing, even if pendingEntries is wrong
-	// Check if there's actually data in the memory table
+	// Close batch buffer first to flush any remaining entries
+	if db.batchBuffer != nil {
+		if err := db.batchBuffer.Close(); err != nil {
+			log.Printf("[ERROR] Failed to close batch buffer: %v", err)
+		}
+	}
+	
+	// Also check for any data in the legacy in-memory table
 	var count int
 	err := db.QueryRow("SELECT COUNT(*) FROM logs").Scan(&count)
 	if err != nil {
 		log.Printf("[WARN] Failed to check remaining entries on close: %v", err)
 	} else if count > 0 {
-		log.Printf("[INFO] Flushing %d remaining entries on session close", count)
+		log.Printf("[INFO] Flushing %d remaining entries from legacy table on session close", count)
 		if err := db.flushToParquet(); err != nil {
 			log.Printf("[ERROR] Failed to flush remaining data on close: %v", err)
 		}

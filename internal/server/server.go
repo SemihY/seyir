@@ -59,6 +59,12 @@ func (s *Server) Start() error {
 	// API endpoint for search
 	http.HandleFunc("/api/search", s.serveSearchAPI)
 	
+	// Register batch buffer management endpoints
+	db.RegisterBatchHandlers(http.DefaultServeMux)
+	
+	// API endpoint for system health including batch buffers
+	http.HandleFunc("/api/health", s.serveHealthAPI)
+	
 	// Start server
 	return http.ListenAndServe(":"+s.port, nil)
 }
@@ -180,4 +186,30 @@ func (s *Server) serveSearchAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	
 	json.NewEncoder(w).Encode(response)
+}
+
+// serveHealthAPI handles the /api/health endpoint
+func (s *Server) serveHealthAPI(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	
+	// Get batch buffer health
+	batchHealth := db.BatchBufferHealthCheck()
+	
+	// Get session information
+	sessions := db.GetActiveSessions()
+	
+	// Combine health information
+	health := map[string]interface{}{
+		"status":         "ok",
+		"batch_buffers":  batchHealth,
+		"active_sessions": len(sessions),
+		"sessions":       sessions,
+	}
+	
+	// Determine overall health status
+	if batchBufferHealthy, ok := batchHealth["healthy"].(bool); !ok || !batchBufferHealthy {
+		health["status"] = "warning"
+	}
+	
+	json.NewEncoder(w).Encode(health)
 }
