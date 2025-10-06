@@ -8,7 +8,7 @@
   },
   "file_rotation": {
     "max_file_size_mb": 50,
-    "max_files": 10,
+    "max_files": 50,
     "compression": "snappy"
   },
   "retention": {
@@ -17,7 +17,7 @@
     "cleanup_hours": 1,
     "max_files_per_scan": 1000,
     "dry_run": false,
-    "keep_min_files": 5,
+    "keep_min_files": 100,
     "max_total_size_gb": 10.0
   },
   "process_dirs": {

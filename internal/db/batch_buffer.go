@@ -61,6 +61,7 @@ type FileRotation struct {
 	maxFiles       int
 	currentSize    int64
 	currentFileNum int
+	currentFile    string  // Cache current file path
 	mutex          sync.Mutex
 }
 
@@ -80,15 +81,29 @@ func (fr *FileRotation) GetCurrentFilePath() (string, error) {
 	fr.mutex.Lock()
 	defer fr.mutex.Unlock()
 	
+	// If we don't have a current file, generate one
+	if fr.currentFile == "" {
+		if err := fr.generateNewFilePath(); err != nil {
+			return "", err
+		}
+	}
+	
+	return fr.currentFile, nil
+}
+
+// generateNewFilePath creates a new file path (internal use only)
+func (fr *FileRotation) generateNewFilePath() error {
 	// Create process directory if it doesn't exist
 	processDir := filepath.Join(fr.baseDir, fr.processName)
 	if err := os.MkdirAll(processDir, 0755); err != nil {
-		return "", fmt.Errorf("failed to create process directory %s: %v", processDir, err)
+		return fmt.Errorf("failed to create process directory %s: %v", processDir, err)
 	}
 	
 	timestamp := time.Now().Format("20060102_150405")
 	filename := fmt.Sprintf("%s_%s_%d.parquet", fr.processName, timestamp, fr.currentFileNum)
-	return filepath.Join(processDir, filename), nil
+	fr.currentFile = filepath.Join(processDir, filename)
+	
+	return nil
 }
 
 // ShouldRotate checks if we need to rotate the file
@@ -106,6 +121,7 @@ func (fr *FileRotation) Rotate() error {
 	
 	fr.currentFileNum++
 	fr.currentSize = 0
+	fr.currentFile = "" // Clear current file to force new generation
 	
 	// Clean up old files if we exceed maxFiles
 	if fr.maxFiles > 0 {
@@ -199,11 +215,19 @@ func NewBatchBuffer(db *DB, config *BatchConfig) *BatchBuffer {
 	
 	// Create file rotation manager
 	lakeDir := GetGlobalLakeDir()
+	
+	// Get config values from config file
+	configFile, err := LoadConfigFromFile(DefaultConfigPath)
+	if err != nil {
+		log.Printf("[WARN] Could not load config file, using defaults: %v", err)
+		configFile = DefaultConfigFile()
+	}
+	
 	fileRotation := NewFileRotation(
 		processName,
 		lakeDir,
-		50*1024*1024, // 50MB per file
-		10,           // Keep max 10 files per process
+		int64(configFile.FileRotation.MaxFileSizeMB)*1024*1024, // Config'den al
+		configFile.FileRotation.MaxFiles,                       // Config'den al
 	)
 	
 	bb := &BatchBuffer{

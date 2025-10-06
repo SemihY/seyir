@@ -417,37 +417,6 @@ func (db *DB) ClearMemoryTable() error {
 	}
 	return nil
 }
-
-// detectParquetSchema checks what columns are available in the Parquet files
-func detectParquetSchema(db *sql.DB, parquetPattern string) (bool, error) {
-	// Try to describe the structure of one parquet file to see what columns are available
-	testSQL := fmt.Sprintf("DESCRIBE SELECT * FROM read_parquet('%s') LIMIT 1", parquetPattern)
-	rows, err := db.Query(testSQL)
-	if err != nil {
-		return false, err
-	}
-	defer rows.Close()
-	
-	hasExtendedColumns := false
-	for rows.Next() {
-		var columnName, columnType, nullable interface{}
-		if err := rows.Scan(&columnName, &columnType, &nullable); err == nil {
-			if colName, ok := columnName.(string); ok && colName == "trace_id" {
-				hasExtendedColumns = true
-				break
-			}
-		}
-	}
-	
-	return hasExtendedColumns, nil
-}
-
-
-
-
-
-
-
 // Session management functions
 
 // GetActiveSessions returns information about currently active sessions
