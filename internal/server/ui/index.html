@@ -1,744 +1,237 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="tr">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>seyir - Log Viewer</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
-    :root {
-      --log-info-bg: #dbeafe;
-      --log-info-text: #1e40af;
-      --log-debug-bg: #f3f4f6;
-      --log-debug-text: #4b5563;
-      --log-warn-bg: #fef3c7;
-      --log-warn-text: #d97706;
-      --log-error-bg: #fee2e2;
-      --log-error-text: #dc2626;
-    }
-
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-
     body {
-      font-family: 'Inter', sans-serif;
-      background-color: #f9fafb;
-      color: #111827;
-      min-height: 100vh;
+      font-family: Arial, sans-serif;
+      margin: 0; padding: 1rem;
+      background: #f9f9f9;
+      color: #333;
+    }
+    header {
       display: flex;
-      flex-direction: column;
-    }
-
-    /* Header */
-    .header {
-      position: sticky;
-      top: 0;
-      z-index: 10;
-      border-bottom: 1px solid #e5e7eb;
-      background: rgba(255, 255, 255, 0.95);
-      backdrop-filter: blur(8px);
-    }
-
-    .header-container {
-      max-width: 1280px;
-      margin: 0 auto;
-      padding: 0 1rem;
-    }
-
-    .header-content {
-      display: flex;
-      height: 4rem;
-      align-items: center;
       justify-content: space-between;
-    }
-
-    .logo-section {
-      display: flex;
       align-items: center;
-      gap: 2rem;
+      padding-bottom: 1rem;
+      border-bottom: 1px solid #ccc;
+      margin-bottom: 1rem;
     }
-
-    .logo {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      text-decoration: none;
-      color: inherit;
-    }
-
-    .logo-icon {
-      width: 1.75rem;
-      height: 1.75rem;
-      color: #2563eb;
-    }
-
-    .logo-text {
-      font-size: 1.25rem;
+    header .logo {
       font-weight: 700;
-      color: #111827;
-    }
-
-    .nav {
-      display: none;
-      align-items: center;
-      gap: 1.5rem;
-    }
-
-    @media (min-width: 768px) {
-      .nav {
-        display: flex;
-      }
-    }
-
-    .nav-link {
-      font-size: 0.875rem;
-      font-weight: 500;
+      font-size: 1.25rem;
+      color: #222;
       text-decoration: none;
-      color: #6b7280;
-      transition: color 0.2s;
     }
-
-    .nav-link:hover {
-      color: #2563eb;
+    nav a {
+      margin-left: 1rem;
+      text-decoration: none;
+      color: #555;
+      font-weight: 500;
     }
-
-    .nav-link.active {
-      color: #2563eb;
+    nav a.active {
+      color: #007bff;
+      font-weight: 700;
     }
-
-    .user-avatar {
-      width: 2.5rem;
-      height: 2.5rem;
-      border-radius: 50%;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    }
-
-    /* Main Content */
-    .main {
-      flex: 1;
-    }
-
-    .main-container {
-      max-width: 1280px;
-      margin: 0 auto;
-      padding: 2rem 1rem;
-    }
-
-    /* Column-based Filters */
-    .filters-section {
-      margin-bottom: 1.5rem;
-      padding: 1.5rem;
-      background: white;
-      border-radius: 0.75rem;
-      border: 1px solid #e5e7eb;
-      box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
-    }
-
-    .filters-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    .filters {
+      display: flex;
+      flex-wrap: wrap;
       gap: 1rem;
       margin-bottom: 1rem;
     }
-
     .filter-group {
       display: flex;
       flex-direction: column;
-      gap: 0.5rem;
+      min-width: 140px;
     }
-
-    .filter-group label {
-      font-size: 0.875rem;
+    label {
       font-weight: 600;
-      color: #374151;
+      margin-bottom: 0.25rem;
+      font-size: 0.9rem;
     }
-
-    .filter-select, .filter-input {
-      padding: 0.5rem 0.75rem;
-      border-radius: 0.375rem;
-      border: 1px solid #d1d5db;
-      background: white;
-      color: #374151;
-      font-size: 0.875rem;
-      transition: all 0.2s;
+    select, input[type="text"], input[type="datetime-local"] {
+      padding: 0.3rem 0.5rem;
+      font-size: 0.9rem;
+      border: 1px solid #ccc;
+      border-radius: 3px;
     }
-
-    .filter-select:focus, .filter-input:focus {
-      outline: none;
-      border-color: #2563eb;
-      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
-    }
-
-    .filter-input::placeholder {
-      color: #9ca3af;
-    }
-
-    .filter-actions {
-      display: flex;
-      gap: 0.75rem;
-      flex-wrap: wrap;
-      padding-top: 1rem;
-      border-top: 1px solid #f3f4f6;
-    }
-
-    /* Controls */
-    .controls {
-      display: flex;
-      gap: 1rem;
-      align-items: center;
-      margin-bottom: 1.5rem;
-      flex-wrap: wrap;
-      padding: 1rem;
-      background: white;
-      border-radius: 0.5rem;
-      border: 1px solid #e5e7eb;
-    }
-
-    .btn {
-      padding: 0.5rem 1rem;
-      border-radius: 0.375rem;
-      border: 1px solid #d1d5db;
-      background: white;
-      color: #374151;
-      font-size: 0.875rem;
-      font-weight: 500;
+    button {
       cursor: pointer;
-      transition: all 0.2s;
-    }
-
-    .btn:hover {
-      background: #f9fafb;
-      border-color: #9ca3af;
-    }
-
-    .btn.primary {
-      background: #2563eb;
-      border-color: #2563eb;
-      color: white;
-    }
-
-    .btn.primary:hover {
-      background: #1d4ed8;
-    }
-
-    .select {
-      padding: 0.5rem 0.75rem;
-      border-radius: 0.375rem;
-      border: 1px solid #d1d5db;
-      background: white;
-      color: #374151;
-      font-size: 0.875rem;
-      cursor: pointer;
-    }
-
-    .status-indicator {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      font-size: 0.875rem;
-      color: #6b7280;
-    }
-
-    .status-dot {
-      width: 0.5rem;
-      height: 0.5rem;
-      border-radius: 50%;
-      background: #10b981;
-    }
-
-    /* Table */
-    .table-container {
-      overflow-x: auto;
-      border-radius: 0.75rem;
-      border: 1px solid #e5e7eb;
-      background: white;
-      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-    }
-
-    .table {
-      min-width: 100%;
-      border-collapse: collapse;
-    }
-
-    .table thead {
-      background: linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%);
-    }
-
-    .table th {
-      padding: 1rem 1.5rem;
-      text-align: left;
-      font-size: 0.75rem;
+      padding: 0.4rem 0.8rem;
       font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: #374151;
-      border-bottom: 2px solid #e5e7eb;
-    }
-
-    .table tbody {
-      background: white;
-    }
-
-    .table td {
-      padding: 1rem 1.5rem;
-      font-size: 0.875rem;
-      color: #111827;
-      vertical-align: top;
-      border-bottom: 1px solid #f3f4f6;
-    }
-
-    .table tbody tr {
-      transition: all 0.2s;
-    }
-
-    .table tbody tr:hover {
-      background: linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%);
-    }
-
-    /* Log Levels */
-    .log-level {
-      display: inline-flex;
-      align-items: center;
-      padding: 0.25rem 0.75rem;
-      border-radius: 0.5rem;
-      font-size: 0.75rem;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.025em;
-    }
-
-    .log-level-info {
-      background: var(--log-info-bg);
-      color: var(--log-info-text);
-    }
-
-    .log-level-debug {
-      background: var(--log-debug-bg);
-      color: var(--log-debug-text);
-    }
-
-    .log-level-warn {
-      background: var(--log-warn-bg);
-      color: var(--log-warn-text);
-    }
-
-    .log-level-error {
-      background: var(--log-error-bg);
-      color: var(--log-error-text);
-    }
-
-    /* Structured Data Styles */
-    .trace-id-code {
-      background: #f1f5f9;
-      padding: 0.125rem 0.375rem;
-      border-radius: 0.25rem;
-      font-family: 'Monaco', 'Consolas', 'Courier New', monospace;
-      font-size: 0.8rem;
-      color: #475569;
-    }
-
-    .details-btn {
-      background: #3b82f6;
-      color: white;
       border: none;
-      border-radius: 0.25rem;
-      padding: 0.25rem 0.5rem;
-      cursor: pointer;
-      font-size: 0.75rem;
-      transition: background-color 0.2s;
+      border-radius: 3px;
+      background-color: #007bff;
+      color: white;
+      transition: background-color 0.2s ease;
     }
-
-    .details-btn:hover {
-      background: #2563eb;
+    button:hover {
+      background-color: #0056b3;
     }
-
-    .details-row {
-      background: #f8fafc;
-      border-left: 4px solid #3b82f6;
+    button.secondary {
+      background-color: #6c757d;
     }
-
-    .details-row.hidden {
-      display: none;
+    button.secondary:hover {
+      background-color: #5a6268;
     }
-
-    .details-content {
-      padding: 1rem;
+    .filter-actions {
+      margin-top: 0.5rem;
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
     }
-
-    .structured-data {
-      font-size: 0.875rem;
-      line-height: 1.5;
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: white;
+      box-shadow: 0 0 5px rgba(0,0,0,0.05);
     }
-
-    .structured-data strong {
-      color: #374151;
+    th, td {
+      border: 1px solid #ddd;
+      padding: 0.4rem 0.6rem;
+      font-size: 0.9rem;
+      text-align: left;
+    }
+    th {
+      background-color: #f0f0f0;
       font-weight: 600;
     }
-
-    .tag {
-      display: inline-block;
-      background: #e0e7ff;
-      color: #3730a3;
-      padding: 0.125rem 0.5rem;
-      border-radius: 1rem;
-      font-size: 0.75rem;
-      font-weight: 500;
-      margin-right: 0.25rem;
+    .empty-state {
+      text-align: center;
+      color: #888;
+      padding: 2rem;
     }
-
-    /* Pagination */
     .pagination {
+      margin-top: 0.75rem;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 1.5rem;
-      background: white;
-      border-top: 1px solid #e5e7eb;
+      font-size: 0.9rem;
+      color: #555;
     }
-
-    .pagination-info {
-      font-size: 0.875rem;
-      color: #6b7280;
-      font-weight: 500;
-    }
-
-    .pagination-controls {
-      display: flex;
-      gap: 0.5rem;
-    }
-
-    .page-btn {
-      padding: 0.5rem 1rem;
-      border-radius: 0.375rem;
-      border: 1px solid #d1d5db;
-      background: white;
-      color: #374151;
-      font-size: 0.875rem;
-      font-weight: 500;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-
-    .page-btn:hover:not(:disabled) {
-      background: #2563eb;
-      border-color: #2563eb;
+    .pagination-controls button {
+      background-color: #007bff;
       color: white;
+      padding: 0.3rem 0.7rem;
+      margin-left: 0.3rem;
+      margin-right: 0.3rem;
+      border-radius: 3px;
+      border: none;
     }
-
-    .page-btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
+    .pagination-controls button:disabled {
+      background-color: #aaa;
+      cursor: default;
     }
-
-    /* Loading and Status */
-    .loading {
-      display: none;
-      color: #2563eb;
-      font-weight: 500;
-    }
-
-    .loading.active {
-      display: inline;
-    }
-
     .status {
-      padding: 3rem;
-      text-align: center;
-      color: #6b7280;
-      font-style: italic;
-    }
-
-    .error {
-      padding: 3rem;
-      text-align: center;
-      color: #dc2626;
-      font-weight: 500;
-    }
-
-    .empty-state {
-      padding: 4rem 2rem;
-      text-align: center;
-      color: #6b7280;
-    }
-
-    .empty-state-icon {
-      width: 4rem;
-      height: 4rem;
-      margin: 0 auto 1rem;
-      color: #d1d5db;
-    }
-
-    .empty-state h3 {
-      font-size: 1.125rem;
-      font-weight: 600;
-      color: #374151;
-      margin-bottom: 0.5rem;
-    }
-
-    /* Responsive */
-    .timestamp {
-      white-space: nowrap;
-      font-family: 'SF Mono', Monaco, Consolas, monospace;
-      font-size: 0.8rem;
-      color: #6b7280;
-      font-weight: 500;
-    }
-
-    .message {
-      word-break: break-words;
-      max-width: 500px;
-      line-height: 1.5;
-    }
-
-    .source {
-      white-space: nowrap;
-      font-weight: 600;
-      color: #374151;
-    }
-
-    @media (max-width: 768px) {
-      .main-container {
-        padding: 1rem 0.5rem;
-      }
-      
-      .controls {
-        flex-direction: column;
-        align-items: stretch;
-        gap: 0.5rem;
-      }
-      
-      .table th,
-      .table td {
-        padding: 0.75rem;
-      }
-      
-      .message {
-        max-width: 200px;
-      }
-
-      .pagination {
-        flex-direction: column;
-        gap: 1rem;
-      }
-    }
-
-    /* Animations */
-    @keyframes slideIn {
-      from {
-        opacity: 0;
-        transform: translateY(10px);
-      }
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
-    }
-
-    .table tbody tr {
-      animation: slideIn 0.3s ease-out;
-    }
-
-    .pulse {
-      animation: pulse 2s infinite;
-    }
-
-    @keyframes pulse {
-      0%, 100% {
-        opacity: 1;
-      }
-      50% {
-        opacity: 0.5;
-      }
+      font-size: 0.85rem;
+      color: #666;
+      margin-left: 1rem;
     }
   </style>
 </head>
 <body>
-  <!-- Header -->
-  <header class="header">
-    <div class="header-container">
-      <div class="header-content">
-        <div class="logo-section">
-          <a href="#" class="logo">
-            <svg class="logo-icon" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewBox="0 0 24 24">
-              <path d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
-            </svg>
-            <span class="logo-text">seyir</span>
-          </a>
-          <nav class="nav">
-            <a href="#" class="nav-link">Dashboard</a>
-            <a href="#" class="nav-link active">Logs</a>
-            <a href="#" class="nav-link">Alerts</a>
-            <a href="#" class="nav-link">Settings</a>
-          </nav>
-        </div>
-        <div class="user-avatar"></div>
-      </div>
-    </div>
+  <header>
+    <a href="#" class="logo">seyir</a>
+    <nav>
+      <a href="#">Dashboard</a>
+      <a href="#" class="active">Logs</a>
+      <a href="#">Alerts</a>
+      <a href="#">Settings</a>
+    </nav>
   </header>
 
-  <!-- Main Content -->
-  <main class="main">
-    <div class="main-container">
-      <!-- Column-based Filters -->
-      <div class="filters-section">
-        <h3 style="margin-bottom: 1rem; color: #374151; font-size: 1.125rem; font-weight: 600;">
-          🎯 Projection Pushdown Filters (Exact Matches Only)
-        </h3>
-        <div class="filters-grid">
-          <div class="filter-group">
-            <label for="sourceFilter">Source</label>
-            <select id="sourceFilter" class="filter-select">
-              <option value="">All Sources</option>
-            </select>
-          </div>
-          
-          <div class="filter-group">
-            <label for="levelFilter">Level</label>
-            <select id="levelFilter" class="filter-select">
-              <option value="">All Levels</option>
-              <option value="DEBUG">DEBUG</option>
-              <option value="INFO">INFO</option>
-              <option value="WARN">WARN</option>
-              <option value="ERROR">ERROR</option>
-              <option value="FATAL">FATAL</option>
-            </select>
-          </div>
-          
-          <div class="filter-group">
-            <label for="traceIdFilter">Trace ID</label>
-            <input id="traceIdFilter" class="filter-input" placeholder="Exact trace ID..." type="text">
-          </div>
-          
-          <div class="filter-group">
-            <label for="timeFromFilter">From Time</label>
-            <input id="timeFromFilter" class="filter-input" type="datetime-local">
-          </div>
-          
-          <div class="filter-group">
-            <label for="timeToFilter">To Time</label>
-            <input id="timeToFilter" class="filter-input" type="datetime-local">
-          </div>
-          
-          <div class="filter-group">
-            <label for="limitFilter">Limit</label>
-            <select id="limitFilter" class="filter-select">
-              <option value="50">50</option>
-              <option value="100" selected>100</option>
-              <option value="200">200</option>
-              <option value="500">500</option>
-            </select>
-          </div>
-        </div>
-        
-        <div class="filter-actions">
-          <button id="applyFilters" class="btn primary">
-            <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16" style="margin-right: 0.25rem;">
-              <path d="M6 10.5a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1h-3a.5.5 0 0 1-.5-.5zm-2-3a.5.5 0 0 1 .5-.5h7a.5.5 0 0 1 0 1h-7a.5.5 0 0 1-.5-.5zm-2-3a.5.5 0 0 1 .5-.5h11a.5.5 0 0 1 0 1h-11a.5.5 0 0 1-.5-.5z"/>
-            </svg>
-            Apply Filters
-          </button>
-          
-          <button id="clearFilters" class="btn">
-            <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16" style="margin-right: 0.25rem;">
-              <path d="M2.146 2.854a.5.5 0 1 1 .708-.708L8 7.293l5.146-5.147a.5.5 0 0 1 .708.708L8.707 8l5.147 5.146a.5.5 0 0 1-.708.708L8 8.707l-5.146 5.147a.5.5 0 0 1-.708-.708L7.293 8 2.146 2.854Z"/>
-            </svg>
-            Clear All
-          </button>
-          
-          <button id="refreshSources" class="btn">
-            <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16" style="margin-right: 0.25rem;">
-              <path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2v1z"/>
-              <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z"/>
-            </svg>
-            Refresh Sources
-          </button>
-        </div>
-      </div>
-
-      <!-- Controls -->
-      <div class="controls">
-        <button id="refreshBtn" class="btn primary">
-          <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16" style="margin-right: 0.25rem;">
-            <path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2v1z"/>
-            <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z"/>
-          </svg>
-          Refresh
-        </button>
-        
-        <label style="display: flex; align-items: center; gap: 0.5rem;">
-          <span>Page Size:</span>
-          <select id="bufferSize" class="select">
-            <option value="25">25</option>
-            <option value="50" selected>50</option>
-            <option value="100">100</option>
-            <option value="200">200</option>
-          </select>
-        </label>
-
-        <div class="status-indicator">
-          <div class="status-dot pulse"></div>
-          <span class="loading" id="loading">Loading...</span>
-          <span id="connectionStatus">Ready</span>
-        </div>
-
-        <span id="lastUpdate" style="font-size: 0.875rem; color: #6b7280;">Last update: -</span>
-      </div>
-
-      <!-- Table -->
-      <div class="table-container">
-        <table class="table">
-          <thead>
-            <tr>
-              <th style="width: 180px;">Timestamp</th>
-              <th style="width: 100px;">Level</th>
-              <th>Message</th>
-              <th style="width: 120px;">Source</th>
-              <th style="width: 120px;">Trace ID</th>
-              <th style="width: 100px;">Tags</th>
-            </tr>
-          </thead>
-          <tbody id="logContainer">
-            <tr>
-              <td colspan="6" class="empty-state">
-                <div class="empty-state-icon">
-                  <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-                  </svg>
-                </div>
-                <h3>Loading logs...</h3>
-                <p>Please wait, fetching optimized projection pushdown query...</p>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-
-        <!-- Pagination -->
-        <div class="pagination" id="pagination">
-          <div class="pagination-info">
-            <span id="logCount">0 logs</span> • 
-            <span id="pageInfo">Page 1 / 1</span>
-          </div>
-          <div class="pagination-controls">
-            <button id="prevPage" class="page-btn">
-              <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16" style="margin-right: 0.25rem;">
-                <path fill-rule="evenodd" d="M11.354 1.646a.5.5 0 0 1 0 .708L5.707 8l5.647 5.646a.5.5 0 0 1-.708.708l-6-6a.5.5 0 0 1 0-.708l6-6a.5.5 0 0 1 .708 0z"/>
-              </svg>
-              Previous
-            </button>
-            <button id="nextPage" class="page-btn">
-              Next
-              <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16" style="margin-left: 0.25rem;">
-                <path fill-rule="evenodd" d="M4.646 1.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1 0 .708l-6 6a.5.5 0 0 1-.708-.708L10.293 8 4.646 2.354a.5.5 0 0 1 0-.708z"/>
-              </svg>
-            </button>
-          </div>
-        </div>
-      </div>
+  <section class="filters" aria-label="Log filters">
+    <div class="filter-group">
+      <label for="sourceFilter">Source</label>
+      <select id="sourceFilter">
+        <option value="">All Sources</option>
+      </select>
     </div>
-  </main>
+    <div class="filter-group">
+      <label for="levelFilter">Level</label>
+      <select id="levelFilter">
+        <option value="">All Levels</option>
+        <option value="DEBUG">DEBUG</option>
+        <option value="INFO">INFO</option>
+        <option value="WARN">WARN</option>
+        <option value="ERROR">ERROR</option>
+        <option value="FATAL">FATAL</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <label for="traceIdFilter">Trace ID</label>
+      <input type="text" id="traceIdFilter" placeholder="Exact trace ID..." />
+    </div>
+    <div class="filter-group">
+      <label for="timeFromFilter">From Time</label>
+      <input type="datetime-local" id="timeFromFilter" />
+    </div>
+    <div class="filter-group">
+      <label for="timeToFilter">To Time</label>
+      <input type="datetime-local" id="timeToFilter" />
+    </div>
+    <div class="filter-group">
+      <label for="limitFilter">Limit</label>
+      <select id="limitFilter">
+        <option value="50">50</option>
+        <option value="100" selected>100</option>
+        <option value="200">200</option>
+        <option value="500">500</option>
+      </select>
+    </div>
+  </section>
+
+  <div class="filter-actions">
+    <button id="applyFilters">Apply Filters</button>
+    <button id="clearFilters" class="secondary">Clear All</button>
+    <button id="refreshSources" class="secondary">Refresh Sources</button>
+  </div>
+
+  <div style="margin-top: 1rem; display: flex; align-items: center; gap: 1rem;">
+    <button id="refreshBtn">Refresh</button>
+    <label for="bufferSize" style="font-size: 0.9rem;">
+      Page Size:
+      <select id="bufferSize">
+        <option value="25">25</option>
+        <option value="50" selected>50</option>
+        <option value="100">100</option>
+        <option value="200">200</option>
+      </select>
+    </label>
+    <div class="status" id="connectionStatus">Ready</div>
+    <div class="status" id="lastUpdate">Last update: -</div>
+    <div id="logCount">0 logs</div>
+    <div id="pageInfo" style="margin-left: 1rem;">Page 1 / 1</div>
+  </div>
+
+  <table aria-label="Log entries" style="margin-top: 1rem;">
+    <thead>
+      <tr>
+        <th style="width: 180px;">Timestamp</th>
+        <th style="width: 100px;">Level</th>
+        <th>Message</th>
+        <th style="width: 120px;">Source</th>
+        <th style="width: 120px;">Trace ID</th>
+        <th style="width: 100px;">Tags</th>
+      </tr>
+    </thead>
+    <tbody id="logContainer">
+      <tr>
+        <td colspan="6" class="empty-state">
+          Loading logs... Please wait, fetching optimized projection pushdown query...
+        </td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="pagination" aria-label="Pagination controls">
+    <div class="pagination-controls">
+      <button id="prevPage" disabled>Previous</button>
+      <button id="nextPage" disabled>Next</button>
+    </div>
+  </div>
 
   <script src="/static/main.js"></script>
 </body>
