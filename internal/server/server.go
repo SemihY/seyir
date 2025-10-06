@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"seyir/internal/db"
 	"strconv"
+	"time"
 
 	_ "github.com/marcboeker/go-duckdb/v2"
 )
@@ -53,11 +54,13 @@ func (s *Server) Start() error {
 	// Serve main HTML page
 	http.HandleFunc("/", s.serveHomePage)
 	
-	// API endpoint for logs with pagination
-	http.HandleFunc("/api/logs", s.serveLogsAPI)
+
 	
-	// API endpoint for search
-	http.HandleFunc("/api/search", s.serveSearchAPI)
+	// API endpoint for fast query with projection pushdown
+	http.HandleFunc("/api/query", s.serveQueryAPI)
+	
+	// API endpoint for distinct values
+	http.HandleFunc("/api/query/distinct", s.serveDistinctAPI)
 	
 	// Register batch buffer management endpoints
 	db.RegisterBatchHandlers(http.DefaultServeMux)
@@ -81,111 +84,148 @@ func (s *Server) serveHomePage(w http.ResponseWriter, r *http.Request) {
 	w.Write(indexHTML)
 }
 
-// serveLogsAPI handles the /api/logs endpoint with pagination
-func (s *Server) serveLogsAPI(w http.ResponseWriter, r *http.Request) {
+
+
+
+
+// serveQueryAPI handles the /api/query endpoint with projection pushdown optimization
+func (s *Server) serveQueryAPI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 	
-	// Parse pagination parameters
-	pageStr := r.URL.Query().Get("page")
-	perPageStr := r.URL.Query().Get("perPage")
-	
-	page, err := strconv.Atoi(pageStr)
-	if err != nil || page < 1 {
-		page = 1
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
 	}
 	
-	perPage, err := strconv.Atoi(perPageStr)
-	if err != nil || perPage < 1 || perPage > 1000 {
-		perPage = 50
+	// Parse query parameters
+	query := r.URL.Query()
+	
+	// Build filter from query parameters
+	filter := &db.QueryFilter{
+		Limit: 100, // Default limit for UI
 	}
 	
-	// Get total count first
-	total, err := db.CountLogs("*")
+	// Parse source filter
+	if sources := query.Get("source"); sources != "" {
+		filter.Sources = []string{sources} // Single source for simplicity
+	}
+	
+	// Parse level filter  
+	if levels := query.Get("level"); levels != "" {
+		filter.Levels = []string{levels} // Single level for simplicity
+	}
+	
+	// Parse trace_id filter
+	if traceId := query.Get("trace_id"); traceId != "" {
+		filter.TraceIDs = []string{traceId}
+	}
+	
+	// Parse time range
+	if from := query.Get("from"); from != "" {
+		if t, err := parseTimeParam(from); err == nil {
+			filter.StartTime = t
+		}
+	}
+	
+	if to := query.Get("to"); to != "" {
+		if t, err := parseTimeParam(to); err == nil {
+			filter.EndTime = t
+		}
+	}
+	
+	// Parse limit
+	if limitStr := query.Get("limit"); limitStr != "" {
+		if limit, err := strconv.Atoi(limitStr); err == nil && limit > 0 && limit <= 1000 {
+			filter.Limit = limit
+		}
+	}
+	
+	// Execute fast query
+	result, err := db.FastQuery(filter)
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error": "%s"}`, err.Error()), http.StatusInternalServerError)
 		return
 	}
 	
-	// Calculate offset for pagination
-	offset := (page - 1) * perPage
-	
-	// Get logs with proper pagination
-	logs, err := db.SearchLogsWithPagination("*", perPage, offset)
-	if err != nil {
-		http.Error(w, fmt.Sprintf(`{"error": "%s"}`, err.Error()), http.StatusInternalServerError)
-		return
-	}
-	
-	// Calculate pagination flags
-	hasNext := offset+perPage < total
-	hasPrevious := page > 1
-	
-	response := LogsResponse{
-		Logs:        logs,
-		Total:       total,
-		Page:        page,
-		PerPage:     perPage,
-		HasNext:     hasNext,
-		HasPrevious: hasPrevious,
+	// Stream JSON response
+	response := map[string]interface{}{
+		"logs":          result.Entries,
+		"total":         result.TotalCount,
+		"query_time_ms": result.QueryTime.Milliseconds(),
+		"files_scanned": result.FilesScanned,
+		"limit":         filter.Limit,
 	}
 	
 	json.NewEncoder(w).Encode(response)
 }
 
-// serveSearchAPI handles the /api/search endpoint
-func (s *Server) serveSearchAPI(w http.ResponseWriter, r *http.Request) {
+// serveDistinctAPI handles the /api/query/distinct endpoint for getting distinct column values
+func (s *Server) serveDistinctAPI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 	
-	query := r.URL.Query().Get("q")
-	if query == "" {
-		query = "*"
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
 	}
 	
-	// Parse pagination parameters
-	pageStr := r.URL.Query().Get("page")
-	perPageStr := r.URL.Query().Get("perPage")
+	// Parse query parameters
+	query := r.URL.Query()
 	
-	page, err := strconv.Atoi(pageStr)
-	if err != nil || page < 1 {
-		page = 1
+	column := query.Get("column")
+	if column == "" {
+		http.Error(w, `{"error": "column parameter is required"}`, http.StatusBadRequest)
+		return
 	}
 	
-	perPage, err := strconv.Atoi(perPageStr)
-	if err != nil || perPage < 1 || perPage > 1000 {
-		perPage = 50
+	limitStr := query.Get("limit")
+	limit := 50 // default
+	if limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 1000 {
+			limit = l
+		}
 	}
 	
-	// Get total count for search query
-	total, err := db.CountLogs(query)
+	// Get distinct values
+	values, err := db.GetDistinctValues(column, limit)
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error": "%s"}`, err.Error()), http.StatusInternalServerError)
 		return
 	}
 	
-	// Calculate offset for pagination
-	offset := (page - 1) * perPage
-	
-	// Get search results with proper pagination
-	logs, err := db.SearchLogsWithPagination(query, perPage, offset)
-	if err != nil {
-		http.Error(w, fmt.Sprintf(`{"error": "%s"}`, err.Error()), http.StatusInternalServerError)
-		return
-	}
-	
-	// Calculate pagination flags
-	hasNext := offset+perPage < total
-	hasPrevious := page > 1
-	
-	response := LogsResponse{
-		Logs:        logs,
-		Total:       total,
-		Page:        page,
-		PerPage:     perPage,
-		HasNext:     hasNext,
-		HasPrevious: hasPrevious,
+	// Return response
+	response := map[string]interface{}{
+		"column": column,
+		"values": values,
+		"count":  len(values),
+		"limit":  limit,
 	}
 	
 	json.NewEncoder(w).Encode(response)
+}
+
+// parseTimeParam parses time parameter in various formats
+func parseTimeParam(timeStr string) (*time.Time, error) {
+	// Try different time formats
+	formats := []string{
+		"2006-01-02 15:04:05",
+		"2006-01-02T15:04:05Z",
+		"2006-01-02T15:04:05.000Z",
+		"2006-01-02",
+	}
+	
+	for _, format := range formats {
+		if t, err := time.Parse(format, timeStr); err == nil {
+			return &t, nil
+		}
+	}
+	
+	return nil, fmt.Errorf("invalid time format: %s", timeStr)
 }
 
 // serveHealthAPI handles the /api/health endpoint

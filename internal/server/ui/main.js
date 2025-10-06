@@ -1,19 +1,20 @@
 class LogViewer {
   constructor() {
     this.currentPage = 1;
-    this.pageSize = 50;
-    this.searchQuery = "";
+    this.pageSize = 100;
     this.totalLogs = 0;
     this.isLoading = false;
 
     this.initElements();
     this.initEventListeners();
-    this.loadLogs(1);
+
+    // Load initial data
+    this.loadDistinctSources();
+    this.applyFilters();
   }
 
   initElements() {
     this.logContainer = document.getElementById("logContainer");
-    this.searchEl = document.getElementById("search");
     this.bufferSizeSelect = document.getElementById("bufferSize");
     this.pagination = document.getElementById("pagination");
     this.prevPageBtn = document.getElementById("prevPage");
@@ -23,40 +24,55 @@ class LogViewer {
     this.loading = document.getElementById("loading");
     this.connectionStatus = document.getElementById("connectionStatus");
     this.lastUpdate = document.getElementById("lastUpdate");
+
+    // Filter elements
+    this.sourceFilter = document.getElementById("sourceFilter");
+    this.levelFilter = document.getElementById("levelFilter");
+    this.traceIdFilter = document.getElementById("traceIdFilter");
+    this.timeFromFilter = document.getElementById("timeFromFilter");
+    this.timeToFilter = document.getElementById("timeToFilter");
+    this.limitFilter = document.getElementById("limitFilter");
+    this.applyFiltersBtn = document.getElementById("applyFilters");
+    this.clearFiltersBtn = document.getElementById("clearFilters");
+    this.refreshSourcesBtn = document.getElementById("refreshSources");
   }
 
   initEventListeners() {
-    // Search functionality
-    this.searchEl.addEventListener("input", () => {
-      clearTimeout(this.searchTimeout);
-      this.searchTimeout = setTimeout(() => {
-        this.performSearch();
-      }, 500); // Debounce search
+    // Filter functionality
+    this.applyFiltersBtn.addEventListener("click", () => {
+      this.applyFilters();
     });
 
-    // Enter key for immediate search
-    this.searchEl.addEventListener("keypress", (e) => {
-      if (e.key === "Enter") {
-        clearTimeout(this.searchTimeout);
-        this.performSearch();
-      }
+    this.clearFiltersBtn.addEventListener("click", () => {
+      this.clearAllFilters();
     });
 
-    // Search clear functionality (removed since no clear button in HTML)
+    this.refreshSourcesBtn.addEventListener("click", () => {
+      this.loadDistinctSources();
+    });
 
     // Refresh button
     document.getElementById("refreshBtn").addEventListener("click", () => {
-      if (this.searchQuery) {
-        this.performSearch();
-      } else {
-        this.loadLogs(1);
-      }
+      this.applyFilters();
     });
 
     // Buffer size change (affects page size)
     this.bufferSizeSelect.addEventListener("change", (e) => {
       this.pageSize = parseInt(e.target.value);
-      this.loadLogs(1);
+      this.applyFilters();
+    });
+
+    // Limit filter change
+    this.limitFilter.addEventListener("change", (e) => {
+      this.pageSize = parseInt(e.target.value);
+      this.applyFilters();
+    });
+
+    // Enter key on trace ID input
+    this.traceIdFilter.addEventListener("keypress", (e) => {
+      if (e.key === "Enter") {
+        this.applyFilters();
+      }
     });
 
     // Pagination
@@ -69,52 +85,140 @@ class LogViewer {
     this.nextPageBtn.addEventListener("click", () => {
       this.navigateToPage(this.currentPage + 1);
     });
-
-    // Auto-focus search
-    this.searchEl.focus();
   }
 
-  performSearch() {
-    const query = this.searchEl.value.trim();
-    this.searchQuery = query;
+  applyFilters() {
+    if (this.isLoading) return;
 
-    // Reset to page 1 for new search
     this.currentPage = 1;
+    this.showLoading(true);
+    this.connectionStatus.textContent = "🔍 Applying filters...";
 
-    if (query) {
-      this.searchLogs(query, 1);
-    } else {
-      this.loadLogs(1);
+    try {
+      // Build query URL with filters
+      let apiUrl = `/api/query?limit=${this.pageSize}`;
+
+      // Add filters
+      const sourceFilter = this.sourceFilter.value.trim();
+      if (sourceFilter) {
+        apiUrl += `&source=${encodeURIComponent(sourceFilter)}`;
+      }
+
+      const levelFilter = this.levelFilter.value.trim();
+      if (levelFilter) {
+        apiUrl += `&level=${encodeURIComponent(levelFilter)}`;
+      }
+
+      const traceIdFilter = this.traceIdFilter.value.trim();
+      if (traceIdFilter) {
+        apiUrl += `&trace_id=${encodeURIComponent(traceIdFilter)}`;
+      }
+
+      const timeFromFilter = this.timeFromFilter.value.trim();
+      if (timeFromFilter) {
+        apiUrl += `&from=${encodeURIComponent(timeFromFilter)}`;
+      }
+
+      const timeToFilter = this.timeToFilter.value.trim();
+      if (timeToFilter) {
+        apiUrl += `&to=${encodeURIComponent(timeToFilter)}`;
+      }
+
+      this.executeQuery(apiUrl);
+    } catch (error) {
+      console.error("Failed to apply filters:", error);
+      this.showError("Error applying filters: " + error.message);
+      this.connectionStatus.textContent = "❌ Filter Error";
+      this.showLoading(false);
     }
   }
 
-  async loadLogs(page) {
-    if (this.isLoading) return;
+  clearAllFilters() {
+    this.sourceFilter.value = "";
+    this.levelFilter.value = "";
+    this.traceIdFilter.value = "";
+    this.timeFromFilter.value = "";
+    this.timeToFilter.value = "";
+    this.limitFilter.value = "100";
 
-    this.currentPage = page;
-    this.showLoading(true);
-    this.connectionStatus.textContent = "🔄 Loading...";
+    // Apply cleared filters
+    this.applyFilters();
+  }
 
+  async loadDistinctSources() {
     try {
+      this.refreshSourcesBtn.disabled = true;
+      this.refreshSourcesBtn.textContent = "Loading...";
+
       const response = await fetch(
-        `/api/logs?page=${page}&perPage=${this.pageSize}`
+        "/api/query/distinct?column=source&limit=50"
       );
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || "Failed to load logs");
+        throw new Error(data.error || "Failed to load sources");
       }
 
-      this.displayLogs(data);
-      this.connectionStatus.textContent = "🔗 Connected";
+      // Clear existing options except "All Sources"
+      this.sourceFilter.innerHTML = '<option value="">All Sources</option>';
+
+      // Add distinct sources
+      if (data.values) {
+        data.values.forEach((source) => {
+          const option = document.createElement("option");
+          option.value = source;
+          option.textContent = source;
+          this.sourceFilter.appendChild(option);
+        });
+      }
+    } catch (error) {
+      console.error("Failed to load sources:", error);
+      this.connectionStatus.textContent = "❌ Source Load Error";
+    } finally {
+      this.refreshSourcesBtn.disabled = false;
+      this.refreshSourcesBtn.innerHTML = `
+        <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16" style="margin-right: 0.25rem;">
+          <path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2v1z"/>
+          <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z"/>
+        </svg>
+        Refresh Sources
+      `;
+    }
+  }
+
+  async executeQuery(apiUrl) {
+    try {
+      const response = await fetch(apiUrl);
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to execute query");
+      }
+
+      // Transform data format to match existing UI expectations
+      const transformedData = {
+        logs: data.logs || [],
+        total: data.total || 0,
+        page: 1,
+        hasNext: false,
+        hasPrevious: false,
+      };
+
+      this.displayLogs(transformedData);
+      this.connectionStatus.textContent = `🎯 Filtered (${data.query_time_ms}ms)`;
       this.lastUpdate.textContent = `Last update: ${new Date().toLocaleTimeString()}`;
     } catch (error) {
-      console.error("Failed to load logs:", error);
-      this.showError("Error loading logs: " + error.message);
-      this.connectionStatus.textContent = "❌ Connection Error";
+      console.error("Failed to execute query:", error);
+      this.showError("Query execution failed: " + error.message);
+      this.connectionStatus.textContent = "❌ Query Error";
     } finally {
       this.showLoading(false);
     }
+  }
+
+  async loadLogs(page) {
+    // Use applyFilters instead of direct loading
+    this.applyFilters();
   }
 
   async searchLogs(query, page) {
@@ -125,19 +229,42 @@ class LogViewer {
     this.connectionStatus.textContent = "🔍 Searching...";
 
     try {
-      const response = await fetch(
-        `/api/search?q=${encodeURIComponent(query)}&page=${page}&perPage=${
-          this.pageSize
-        }`
-      );
+      // Parse search query for filters (simple implementation)
+      let apiUrl = `/api/query?limit=${this.pageSize}`;
+
+      // Try to parse structured filters from search
+      if (query.includes("level:")) {
+        const levelMatch = query.match(/level:(\w+)/);
+        if (levelMatch) {
+          apiUrl += `&level=${encodeURIComponent(levelMatch[1])}`;
+        }
+      }
+
+      if (query.includes("source:")) {
+        const sourceMatch = query.match(/source:([^\s]+)/);
+        if (sourceMatch) {
+          apiUrl += `&source=${encodeURIComponent(sourceMatch[1])}`;
+        }
+      }
+
+      const response = await fetch(apiUrl);
       const data = await response.json();
 
       if (!response.ok) {
         throw new Error(data.error || "Failed to search logs");
       }
 
-      this.displayLogs(data);
-      this.connectionStatus.textContent = "🔗 Connected";
+      // Transform data format to match existing UI expectations
+      const transformedData = {
+        logs: data.logs || [],
+        total: data.total || 0,
+        page: 1,
+        hasNext: false,
+        hasPrevious: false,
+      };
+
+      this.displayLogs(transformedData);
+      this.connectionStatus.textContent = `� Found (${data.query_time_ms}ms)`;
       this.lastUpdate.textContent = `Last update: ${new Date().toLocaleTimeString()}`;
     } catch (error) {
       console.error("Failed to search logs:", error);
@@ -154,7 +281,7 @@ class LogViewer {
 
     if (!data.logs || data.logs.length === 0) {
       this.logContainer.innerHTML =
-        '<tr><td colspan="7" class="status">No logs found</td></tr>';
+        '<tr><td colspan="6" class="status">No logs found with current projection pushdown query</td></tr>';
     } else {
       data.logs.forEach((log) => {
         const logElement = this.createLogElement(log);
@@ -174,20 +301,13 @@ class LogViewer {
     // Determine log level class
     const levelLower = (log.level || "INFO").toLowerCase();
 
-    // Generate unique ID for collapsible details
-    const detailId = `detail_${Date.now()}_${Math.random()
-      .toString(36)
-      .substr(2, 9)}`;
-
-    // Check if we have additional structured data
-    const hasStructuredData =
-      log.trace_id ||
-      log.process ||
-      log.component ||
-      log.thread ||
-      log.user_id ||
-      log.request_id ||
-      (log.tags && log.tags.length > 0);
+    // Simplified layout for projection pushdown fields only
+    const tagsHtml =
+      log.tags && log.tags.length > 0
+        ? log.tags
+            .map((tag) => `<span class="tag">${this.escapeHtml(tag)}</span>`)
+            .join(" ")
+        : "-";
 
     tr.innerHTML = `
       <td class="timestamp">${timestamp}</td>
@@ -198,7 +318,6 @@ class LogViewer {
       </td>
       <td class="message">${this.escapeHtml(log.message || "")}</td>
       <td class="source">${this.escapeHtml(log.source || "unknown")}</td>
-      <td class="process">${this.escapeHtml(log.process || "-")}</td>
       <td class="trace-id">
         ${
           log.trace_id
@@ -208,58 +327,8 @@ class LogViewer {
             : "-"
         }
       </td>
-      <td class="details-toggle">
-        ${
-          hasStructuredData
-            ? `<button onclick="toggleDetails('${detailId}')" class="details-btn">📋</button>`
-            : "-"
-        }
-      </td>
+      <td class="tags">${tagsHtml}</td>
     `;
-
-    // Add structured data details row if available
-    if (hasStructuredData) {
-      const detailsRow = document.createElement("tr");
-      detailsRow.id = detailId;
-      detailsRow.className = "details-row hidden";
-
-      const structuredFields = [];
-      if (log.component)
-        structuredFields.push(
-          `<strong>Component:</strong> ${this.escapeHtml(log.component)}`
-        );
-      if (log.thread)
-        structuredFields.push(
-          `<strong>Thread:</strong> ${this.escapeHtml(log.thread)}`
-        );
-      if (log.user_id)
-        structuredFields.push(
-          `<strong>User ID:</strong> ${this.escapeHtml(log.user_id)}`
-        );
-      if (log.request_id)
-        structuredFields.push(
-          `<strong>Request ID:</strong> <code>${this.escapeHtml(
-            log.request_id
-          )}</code>`
-        );
-      if (log.tags && log.tags.length > 0) {
-        const tagsHtml = log.tags
-          .map((tag) => `<span class="tag">${this.escapeHtml(tag)}</span>`)
-          .join(" ");
-        structuredFields.push(`<strong>Tags:</strong> ${tagsHtml}`);
-      }
-
-      detailsRow.innerHTML = `
-        <td colspan="7" class="details-content">
-          <div class="structured-data">
-            ${structuredFields.join("<br>")}
-          </div>
-        </td>
-      `;
-
-      // Insert details row after the main row
-      tr.after(detailsRow);
-    }
 
     return tr;
   }
@@ -281,11 +350,7 @@ class LogViewer {
   }
 
   navigateToPage(page) {
-    if (this.searchQuery) {
-      this.searchLogs(this.searchQuery, page);
-    } else {
-      this.loadLogs(page);
-    }
+    this.applyFilters();
   }
 
   showLoading(show) {
@@ -296,7 +361,7 @@ class LogViewer {
   showError(message) {
     this.logContainer.innerHTML = `
       <tr>
-        <td colspan="4" class="error">
+        <td colspan="6" class="error">
           <div>⚠️ Error</div>
           <div>${message}</div>
         </td>

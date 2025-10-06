@@ -39,7 +39,6 @@ Usage:
 Commands:
     service     Start log collection service (Docker containers + Web UI)
     web         Start web server only 
-    search      Search collected logs
     sessions    Show active log sessions
     cleanup     Clean up old log sessions
     batch       Manage batch buffer settings and statistics
@@ -139,12 +138,14 @@ func main() {
 		runServiceMode(*port)
 	case "web":
 		runWebServer(*port)
-	case "search":
-		if *searchQuery == "" {
-			fmt.Println("Error: --search flag is required for search command")
+	case "query":
+		if len(args) < 2 {
+			runQueryUsage()
 			os.Exit(1)
 		}
-		runSearchMode(*searchQuery, *limit)
+		runQueryCommand(args[1:])
+	case "stats":
+		runQueryStats()
 	case "sessions":
 		runShowSessions()
 	case "cleanup":
@@ -220,30 +221,6 @@ func runPipeMode() {
 	collectorManager.StopAll()
 	db.CleanupBatchBuffers()
 	log.Printf("[INFO] Pipe operation completed")
-}
-
-// runSearchMode searches across all session databases and outputs results
-func runSearchMode(query string, limit int) {
-	fmt.Printf("Searching for: %s (limit: %d)\n", query, limit)
-	
-	// search with db.searchLogs
-	results, err := db.SearchLogs(query, limit)
-	if err != nil {
-		fmt.Printf("Search failed: %v\n", err)
-		return
-	}
-	
-	// Display results
-	fmt.Printf("\nResults:\n")
-	fmt.Printf("%-20s %-15s %-8s %s\n", "TIMESTAMP", "SOURCE", "LEVEL", "MESSAGE")
-	fmt.Printf("%s\n", strings.Repeat("-", 80))
-
-	count := 0
-	for _, entry := range results {
-		fmt.Printf("%-20s %-15s %-8s %s\n", entry.Ts, entry.Source, entry.Level, entry.Message)
-		count++
-	}
-	fmt.Printf("\nFound %d matching log entries\n", count)
 }
 
 // runShowSessions displays information about active sessions
@@ -353,7 +330,6 @@ func runServiceMode(port string) {
 }
 
 // Batch buffer management functions
-
 func runBatchUsage() {
 	fmt.Println(`seyir batch - Batch Buffer Management
 
@@ -633,7 +609,7 @@ func runBatchRetention(args []string) {
 
 func runBatchExample() {
 	example := db.GetConfigExample()
-
+	
 	fmt.Println("Example Batch Configuration (config/config.json):")
 	fmt.Println(example)
 	
@@ -643,3 +619,327 @@ func runBatchExample() {
 	fmt.Printf("3. Or use the HTTP API: POST /api/batch/config\n")
 }
 
+// Query command functions
+func runQueryUsage() {
+	fmt.Println("seyir query - Fast querying with projection pushdown optimization")
+	fmt.Println("")
+	fmt.Println("UI Columns: ts, level, message, trace_id, source, tags")
+	fmt.Println("Projection pushdown provides maximum performance by only selecting needed columns")
+	fmt.Println("")
+	fmt.Println("Usage:")
+	fmt.Println("    seyir query [subcommand] [options]")
+	fmt.Println("")
+	fmt.Println("Subcommands:")
+	fmt.Println("    filter      Query with filters (exact matches only, no LIKE)")
+	fmt.Println("    distinct    Get distinct values for a column")
+	fmt.Println("    timerange   Show time range of all logs")
+	fmt.Println("")
+	fmt.Println("Available Filters (exact matches only):")
+	fmt.Println("    --start         Time range start (2006-01-02 15:04:05)")
+	fmt.Println("    --end           Time range end")
+	fmt.Println("    --sources       Source values (comma-separated)")
+	fmt.Println("    --levels        Level values (comma-separated)")
+	fmt.Println("    --trace-ids     Trace ID values (comma-separated)")
+	fmt.Println("    --tags          Tag values (comma-separated)")
+	fmt.Println("    --limit         Result limit (default: 100)")
+	fmt.Println("    --offset        Result offset")
+	fmt.Println("")
+	fmt.Println("Examples:")
+	fmt.Println("    # Query by time range")
+	fmt.Println("    seyir query filter --start='2025-01-01 00:00:00' --end='2025-01-02 00:00:00'")
+	fmt.Println("")
+	fmt.Println("    # Query by exact values")
+	fmt.Println("    seyir query filter --sources='app,worker' --levels='ERROR,WARN'")
+	fmt.Println("")
+	fmt.Println("    # Query by trace IDs")
+	fmt.Println("    seyir query filter --trace-ids='abc123,def456' --limit=100")
+	fmt.Println("")
+	fmt.Println("    # Query with tags")
+	fmt.Println("    seyir query filter --tags='urgent,critical' --levels='ERROR'")
+	fmt.Println("")
+	fmt.Println("    # Get distinct sources")
+	fmt.Println("    seyir query distinct --column=source --limit=50")
+	fmt.Println("")
+	fmt.Println("    # Show time range")
+	fmt.Println("    seyir query timerange")
+}
+
+func runQueryCommand(args []string) {
+	if len(args) == 0 {
+		runQueryUsage()
+		return
+	}
+	
+	subcommand := args[0]
+	
+	switch subcommand {
+	case "filter":
+		runQueryFilter(args[1:])
+	case "distinct":
+		runQueryDistinct(args[1:])
+	case "timerange":
+		runQueryTimeRange()
+	default:
+		fmt.Printf("Unknown query subcommand: %s\n", subcommand)
+		runQueryUsage()
+	}
+}
+
+func runQueryFilter(args []string) {
+	// Parse filter arguments
+	filter := &db.QueryFilter{
+		Limit: 100, // Default limit
+	}
+	
+	i := 0
+	for i < len(args) {
+		switch args[i] {
+		case "--start":
+			if i+1 < len(args) {
+				if t, err := time.Parse("2006-01-02 15:04:05", args[i+1]); err == nil {
+					filter.StartTime = &t
+				} else {
+					fmt.Printf("Invalid start time format: %s (use: 2006-01-02 15:04:05)\n", args[i+1])
+					return
+				}
+				i += 2
+			} else {
+				fmt.Println("--start requires a value")
+				return
+			}
+		case "--end":
+			if i+1 < len(args) {
+				if t, err := time.Parse("2006-01-02 15:04:05", args[i+1]); err == nil {
+					filter.EndTime = &t
+				} else {
+					fmt.Printf("Invalid end time format: %s (use: 2006-01-02 15:04:05)\n", args[i+1])
+					return
+				}
+				i += 2
+			} else {
+				fmt.Println("--end requires a value")
+				return
+			}
+		case "--sources":
+			if i+1 < len(args) {
+				filter.Sources = strings.Split(args[i+1], ",")
+				i += 2
+			} else {
+				fmt.Println("--sources requires a value")
+				return
+			}
+		case "--levels":
+			if i+1 < len(args) {
+				filter.Levels = strings.Split(args[i+1], ",")
+				i += 2
+			} else {
+				fmt.Println("--levels requires a value")
+				return
+			}
+		case "--trace-ids":
+			if i+1 < len(args) {
+				filter.TraceIDs = strings.Split(args[i+1], ",")
+				i += 2
+			} else {
+				fmt.Println("--trace-ids requires a value")
+				return
+			}
+		case "--tags":
+			if i+1 < len(args) {
+				filter.Tags = strings.Split(args[i+1], ",")
+				i += 2
+			} else {
+				fmt.Println("--tags requires a value")
+				return
+			}
+		case "--limit":
+			if i+1 < len(args) {
+				if limit, err := strconv.Atoi(args[i+1]); err == nil {
+					filter.Limit = limit
+				} else {
+					fmt.Printf("Invalid limit value: %s\n", args[i+1])
+					return
+				}
+				i += 2
+			} else {
+				fmt.Println("--limit requires a value")
+				return
+			}
+		case "--offset":
+			if i+1 < len(args) {
+				if offset, err := strconv.Atoi(args[i+1]); err == nil {
+					filter.Offset = offset
+				} else {
+					fmt.Printf("Invalid offset value: %s\n", args[i+1])
+					return
+				}
+				i += 2
+			} else {
+				fmt.Println("--offset requires a value")
+				return
+			}
+		default:
+			fmt.Printf("Unknown filter option: %s\n", args[i])
+			return
+		}
+	}
+	
+	// Initialize lake directory
+	dataDir := getDataDir()
+	db.SetGlobalLakeDir(filepath.Join(dataDir, "lake"))
+	
+	// Execute query
+	fmt.Println("Executing fast query...")
+	result, err := db.FastQuery(filter)
+	if err != nil {
+		fmt.Printf("Query failed: %v\n", err)
+		return
+	}
+	
+	// Display results
+	fmt.Printf("\nQuery Results:\n")
+	fmt.Printf("Files scanned: %d\n", result.FilesScanned)
+	fmt.Printf("Query time: %v\n", result.QueryTime)
+	fmt.Printf("Total matches: %d\n", result.TotalCount)
+	fmt.Printf("Showing: %d entries\n\n", len(result.Entries))
+	
+	if len(result.Entries) > 0 {
+		fmt.Printf("%-20s %-8s %-15s %-12s %s\n", "TIMESTAMP", "LEVEL", "SOURCE", "TRACE_ID", "MESSAGE")
+		fmt.Printf("%s\n", strings.Repeat("-", 100))
+		
+		for _, entry := range result.Entries {
+			traceID := entry.TraceID
+			if traceID == "" {
+				traceID = "-"
+			}
+			if len(traceID) > 12 {
+				traceID = traceID[:9] + "..."
+			}
+			
+			message := entry.Message
+			if len(message) > 50 {
+				message = message[:47] + "..."
+			}
+			
+			// Show tags if available
+			tagsStr := ""
+			if len(entry.Tags) > 0 {
+				tagsStr = fmt.Sprintf(" [%s]", strings.Join(entry.Tags, ","))
+			}
+			
+			fmt.Printf("%-20s %-8s %-15s %-12s %s%s\n", 
+				entry.Ts.Format("2006-01-02 15:04:05"),
+				entry.Level, entry.Source, traceID, message, tagsStr)
+		}
+	}
+}
+
+func runQueryDistinct(args []string) {
+	var column string
+	var limit = 100
+	
+	i := 0
+	for i < len(args) {
+		switch args[i] {
+		case "--column":
+			if i+1 < len(args) {
+				column = args[i+1]
+				i += 2
+			} else {
+				fmt.Println("--column requires a value")
+				return
+			}
+		case "--limit":
+			if i+1 < len(args) {
+				if l, err := strconv.Atoi(args[i+1]); err == nil {
+					limit = l
+				} else {
+					fmt.Printf("Invalid limit value: %s\n", args[i+1])
+					return
+				}
+				i += 2
+			} else {
+				fmt.Println("--limit requires a value")
+				return
+			}
+		default:
+			fmt.Printf("Unknown option: %s\n", args[i])
+			return
+		}
+	}
+	
+	if column == "" {
+		fmt.Println("--column is required")
+		fmt.Println("Valid columns: source, level, process, component, thread, user_id, request_id, trace_id")
+		return
+	}
+	
+	// Initialize lake directory
+	dataDir := getDataDir()
+	db.SetGlobalLakeDir(filepath.Join(dataDir, "lake"))
+	
+	// Get distinct values
+	values, err := db.GetDistinctValues(column, limit)
+	if err != nil {
+		fmt.Printf("Failed to get distinct values: %v\n", err)
+		return
+	}
+	
+	fmt.Printf("Distinct values for column '%s' (limit %d):\n\n", column, limit)
+	for i, value := range values {
+		fmt.Printf("%d. %s\n", i+1, value)
+	}
+	fmt.Printf("\nTotal: %d values\n", len(values))
+}
+
+func runQueryTimeRange() {
+	// Initialize lake directory
+	dataDir := getDataDir()
+	db.SetGlobalLakeDir(filepath.Join(dataDir, "lake"))
+	
+	// Get time range
+	minTime, maxTime, err := db.GetTimeRange()
+	if err != nil {
+		fmt.Printf("Failed to get time range: %v\n", err)
+		return
+	}
+	
+	if minTime == nil || maxTime == nil {
+		fmt.Println("No log data found")
+		return
+	}
+	
+	fmt.Printf("Log Time Range:\n")
+	fmt.Printf("Oldest: %s\n", minTime.Format("2006-01-02 15:04:05"))
+	fmt.Printf("Newest: %s\n", maxTime.Format("2006-01-02 15:04:05"))
+	fmt.Printf("Duration: %v\n", maxTime.Sub(*minTime))
+}
+
+func runQueryStats() {
+	// Initialize lake directory
+	dataDir := getDataDir()
+	db.SetGlobalLakeDir(filepath.Join(dataDir, "lake"))
+	
+	// Get statistics
+	fmt.Println("Collecting query statistics...")
+	stats, err := db.GetQueryStats()
+	if err != nil {
+		fmt.Printf("Failed to get statistics: %v\n", err)
+		return
+	}
+	
+	fmt.Printf("\nQuery Statistics:\n")
+	fmt.Printf("Total Files: %d\n", stats.TotalFiles)
+	fmt.Printf("Total Size: %.2f MB\n", float64(stats.TotalSizeBytes)/(1024*1024))
+	fmt.Printf("Total Records: %d\n", stats.TotalRecords)
+	if stats.OldestTimestamp != nil {
+		fmt.Printf("Oldest Log: %s\n", stats.OldestTimestamp.Format("2006-01-02 15:04:05"))
+	}
+	if stats.NewestTimestamp != nil {
+		fmt.Printf("Newest Log: %s\n", stats.NewestTimestamp.Format("2006-01-02 15:04:05"))
+	}
+	fmt.Printf("Unique Processes: %d\n", stats.UniqueProcesses)
+	fmt.Printf("Unique Sources: %d\n", stats.UniqueSources)
+	fmt.Printf("Unique Levels: %d\n", stats.UniqueLevels)
+	fmt.Printf("Query Time: %v\n", stats.QueryTime)
+}

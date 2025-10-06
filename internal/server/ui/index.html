@@ -127,46 +127,61 @@
       padding: 2rem 1rem;
     }
 
-    /* Search */
-    .search-section {
+    /* Column-based Filters */
+    .filters-section {
       margin-bottom: 1.5rem;
+      padding: 1.5rem;
+      background: white;
+      border-radius: 0.75rem;
+      border: 1px solid #e5e7eb;
+      box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
     }
 
-    .search-container {
-      position: relative;
+    .filters-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem;
+      margin-bottom: 1rem;
     }
 
-    .search-icon {
-      position: absolute;
-      top: 50%;
-      left: 1rem;
-      transform: translateY(-50%);
-      width: 1.25rem;
-      height: 1.25rem;
-      color: #9ca3af;
-      pointer-events: none;
+    .filter-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
     }
 
-    .search-input {
-      display: block;
-      width: 100%;
-      border-radius: 0.5rem;
+    .filter-group label {
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: #374151;
+    }
+
+    .filter-select, .filter-input {
+      padding: 0.5rem 0.75rem;
+      border-radius: 0.375rem;
       border: 1px solid #d1d5db;
       background: white;
-      padding: 0.75rem 1rem 0.75rem 2.75rem;
-      font-size: 1rem;
-      color: #111827;
+      color: #374151;
+      font-size: 0.875rem;
       transition: all 0.2s;
     }
 
-    .search-input:focus {
+    .filter-select:focus, .filter-input:focus {
       outline: none;
       border-color: #2563eb;
       box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
     }
 
-    .search-input::placeholder {
-      color: #6b7280;
+    .filter-input::placeholder {
+      color: #9ca3af;
+    }
+
+    .filter-actions {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      padding-top: 1rem;
+      border-top: 1px solid #f3f4f6;
     }
 
     /* Controls */
@@ -567,15 +582,79 @@
   <!-- Main Content -->
   <main class="main">
     <div class="main-container">
-      <!-- Search -->
-      <div class="search-section">
-        <div class="search-container">
-          <div class="search-icon">
-            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
-            </svg>
+      <!-- Column-based Filters -->
+      <div class="filters-section">
+        <h3 style="margin-bottom: 1rem; color: #374151; font-size: 1.125rem; font-weight: 600;">
+          🎯 Projection Pushdown Filters (Exact Matches Only)
+        </h3>
+        <div class="filters-grid">
+          <div class="filter-group">
+            <label for="sourceFilter">Source</label>
+            <select id="sourceFilter" class="filter-select">
+              <option value="">All Sources</option>
+            </select>
           </div>
-          <input id="search" class="search-input" placeholder="Search logs (message, source, trace ID, process, component)..." type="search">
+          
+          <div class="filter-group">
+            <label for="levelFilter">Level</label>
+            <select id="levelFilter" class="filter-select">
+              <option value="">All Levels</option>
+              <option value="DEBUG">DEBUG</option>
+              <option value="INFO">INFO</option>
+              <option value="WARN">WARN</option>
+              <option value="ERROR">ERROR</option>
+              <option value="FATAL">FATAL</option>
+            </select>
+          </div>
+          
+          <div class="filter-group">
+            <label for="traceIdFilter">Trace ID</label>
+            <input id="traceIdFilter" class="filter-input" placeholder="Exact trace ID..." type="text">
+          </div>
+          
+          <div class="filter-group">
+            <label for="timeFromFilter">From Time</label>
+            <input id="timeFromFilter" class="filter-input" type="datetime-local">
+          </div>
+          
+          <div class="filter-group">
+            <label for="timeToFilter">To Time</label>
+            <input id="timeToFilter" class="filter-input" type="datetime-local">
+          </div>
+          
+          <div class="filter-group">
+            <label for="limitFilter">Limit</label>
+            <select id="limitFilter" class="filter-select">
+              <option value="50">50</option>
+              <option value="100" selected>100</option>
+              <option value="200">200</option>
+              <option value="500">500</option>
+            </select>
+          </div>
+        </div>
+        
+        <div class="filter-actions">
+          <button id="applyFilters" class="btn primary">
+            <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16" style="margin-right: 0.25rem;">
+              <path d="M6 10.5a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1h-3a.5.5 0 0 1-.5-.5zm-2-3a.5.5 0 0 1 .5-.5h7a.5.5 0 0 1 0 1h-7a.5.5 0 0 1-.5-.5zm-2-3a.5.5 0 0 1 .5-.5h11a.5.5 0 0 1 0 1h-11a.5.5 0 0 1-.5-.5z"/>
+            </svg>
+            Apply Filters
+          </button>
+          
+          <button id="clearFilters" class="btn">
+            <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16" style="margin-right: 0.25rem;">
+              <path d="M2.146 2.854a.5.5 0 1 1 .708-.708L8 7.293l5.146-5.147a.5.5 0 0 1 .708.708L8.707 8l5.147 5.146a.5.5 0 0 1-.708.708L8 8.707l-5.146 5.147a.5.5 0 0 1-.708-.708L7.293 8 2.146 2.854Z"/>
+            </svg>
+            Clear All
+          </button>
+          
+          <button id="refreshSources" class="btn">
+            <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16" style="margin-right: 0.25rem;">
+              <path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2v1z"/>
+              <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z"/>
+            </svg>
+            Refresh Sources
+          </button>
         </div>
       </div>
 
@@ -617,21 +696,20 @@
               <th style="width: 100px;">Level</th>
               <th>Message</th>
               <th style="width: 120px;">Source</th>
-              <th style="width: 120px;">Process</th>
               <th style="width: 120px;">Trace ID</th>
-              <th style="width: 50px;">Details</th>
+              <th style="width: 100px;">Tags</th>
             </tr>
           </thead>
           <tbody id="logContainer">
             <tr>
-              <td colspan="7" class="empty-state">
+              <td colspan="6" class="empty-state">
                 <div class="empty-state-icon">
                   <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
                   </svg>
                 </div>
                 <h3>Loading logs...</h3>
-                <p>Please wait, fetching data.</p>
+                <p>Please wait, fetching optimized projection pushdown query...</p>
               </td>
             </tr>
           </tbody>

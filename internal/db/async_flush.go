@@ -106,8 +106,16 @@ func (afm *AsyncFlushManager) flushWorker(workerID int) {
 	
 	for {
 		select {
-		case task := <-afm.flushQueue:
-			afm.processFlushTask(workerID, task)
+		case task, ok := <-afm.flushQueue:
+			if !ok {
+				log.Printf("[DEBUG] Async flush worker %d: queue closed", workerID)
+				return
+			}
+			if task != nil {
+				afm.processFlushTask(workerID, task)
+			} else {
+				log.Printf("[WARN] Worker %d received nil task from queue", workerID)
+			}
 		case <-afm.ctx.Done():
 			log.Printf("[DEBUG] Async flush worker %d shutting down", workerID)
 			return
@@ -117,6 +125,11 @@ func (afm *AsyncFlushManager) flushWorker(workerID int) {
 
 // processFlushTask processes a single flush task
 func (afm *AsyncFlushManager) processFlushTask(workerID int, task *FlushTask) {
+	if task == nil {
+		log.Printf("[ERROR] Worker %d received nil flush task", workerID)
+		return
+	}
+	
 	start := time.Now()
 	err := afm.performFlush(task)
 	
@@ -164,6 +177,10 @@ func (afm *AsyncFlushManager) processFlushTask(workerID int, task *FlushTask) {
 
 // performFlush performs the actual flush operation using DuckDB
 func (afm *AsyncFlushManager) performFlush(task *FlushTask) error {
+	if task == nil {
+		return fmt.Errorf("flush task is nil")
+	}
+	
 	if len(task.Entries) == 0 {
 		return nil
 	}
