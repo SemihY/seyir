@@ -25,6 +25,16 @@ class LogViewer {
     this.connectionStatus = document.getElementById("connectionStatus");
     this.lastUpdate = document.getElementById("lastUpdate");
 
+    // Validate critical elements
+    if (!this.logContainer) {
+      console.error("Critical element 'logContainer' not found");
+      return;
+    }
+    if (!this.connectionStatus) {
+      console.error("Critical element 'connectionStatus' not found");
+      return;
+    }
+
     // Filter elements
     this.sourceFilter = document.getElementById("sourceFilter");
     this.levelFilter = document.getElementById("levelFilter");
@@ -39,87 +49,131 @@ class LogViewer {
 
   initEventListeners() {
     // Filter functionality
-    this.applyFiltersBtn.addEventListener("click", () => {
-      this.applyFilters();
-    });
+    if (this.applyFiltersBtn) {
+      this.applyFiltersBtn.addEventListener("click", () => {
+        this.applyFilters();
+      });
+    }
 
-    this.clearFiltersBtn.addEventListener("click", () => {
-      this.clearAllFilters();
-    });
+    if (this.clearFiltersBtn) {
+      this.clearFiltersBtn.addEventListener("click", () => {
+        this.clearAllFilters();
+      });
+    }
 
-    this.refreshSourcesBtn.addEventListener("click", () => {
-      this.loadDistinctSources();
-    });
+    if (this.refreshSourcesBtn) {
+      this.refreshSourcesBtn.addEventListener("click", () => {
+        this.loadDistinctSources();
+      });
+    }
 
     // Refresh button
-    document.getElementById("refreshBtn").addEventListener("click", () => {
-      this.applyFilters();
-    });
+    const refreshBtn = document.getElementById("refreshBtn");
+    if (refreshBtn) {
+      refreshBtn.addEventListener("click", () => {
+        this.applyFilters();
+      });
+    }
 
     // Buffer size change (affects page size)
-    this.bufferSizeSelect.addEventListener("change", (e) => {
-      this.pageSize = parseInt(e.target.value);
-      this.applyFilters();
-    });
+    if (this.bufferSizeSelect) {
+      this.bufferSizeSelect.addEventListener("change", (e) => {
+        this.pageSize = parseInt(e.target.value);
+        this.applyFilters();
+      });
+    }
 
     // Limit filter change
-    this.limitFilter.addEventListener("change", (e) => {
-      this.pageSize = parseInt(e.target.value);
-      this.applyFilters();
-    });
+    if (this.limitFilter) {
+      this.limitFilter.addEventListener("change", (e) => {
+        this.pageSize = parseInt(e.target.value);
+        this.applyFilters();
+      });
+    }
 
     // Enter key on trace ID input
-    this.traceIdFilter.addEventListener("keypress", (e) => {
-      if (e.key === "Enter") {
-        this.applyFilters();
-      }
-    });
+    if (this.traceIdFilter) {
+      this.traceIdFilter.addEventListener("keypress", (e) => {
+        if (e.key === "Enter") {
+          this.applyFilters();
+        }
+      });
+    }
 
     // Pagination
-    this.prevPageBtn.addEventListener("click", () => {
-      if (this.currentPage > 1) {
-        this.navigateToPage(this.currentPage - 1);
-      }
-    });
+    if (this.prevPageBtn) {
+      this.prevPageBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        if (!this.prevPageBtn.disabled && this.currentPage > 1) {
+          this.navigateToPage(this.currentPage - 1);
+        }
+      });
+    }
 
-    this.nextPageBtn.addEventListener("click", () => {
-      this.navigateToPage(this.currentPage + 1);
-    });
+    if (this.nextPageBtn) {
+      this.nextPageBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        if (!this.nextPageBtn.disabled) {
+          this.navigateToPage(this.currentPage + 1);
+        }
+      });
+    }
   }
 
   applyFilters() {
+    this.currentPage = 1;
+    this.applyFiltersWithPage(1);
+  }
+
+  applyFiltersWithPage(page) {
     if (this.isLoading) return;
 
-    this.currentPage = 1;
+    this.currentPage = page || 1;
     this.showLoading(true);
-    this.connectionStatus.textContent = "🔍 Applying filters...";
+    if (this.connectionStatus) {
+      this.connectionStatus.textContent = "🔍 Querying...";
+    }
 
     try {
-      // Build query URL with filters
+      // Build query URL with filters and pagination
       let apiUrl = `/api/query?limit=${this.pageSize}`;
 
+      // Add pagination offset
+      const offset = (this.currentPage - 1) * this.pageSize;
+      if (offset > 0) {
+        apiUrl += `&offset=${offset}`;
+      }
+
       // Add filters
-      const sourceFilter = this.sourceFilter.value.trim();
+      const sourceFilter = this.sourceFilter
+        ? this.sourceFilter.value.trim()
+        : "";
       if (sourceFilter) {
         apiUrl += `&source=${encodeURIComponent(sourceFilter)}`;
       }
 
-      const levelFilter = this.levelFilter.value.trim();
+      const levelFilter = this.levelFilter ? this.levelFilter.value.trim() : "";
       if (levelFilter) {
         apiUrl += `&level=${encodeURIComponent(levelFilter)}`;
       }
 
-      const traceIdFilter = this.traceIdFilter.value.trim();
+      const traceIdFilter = this.traceIdFilter
+        ? this.traceIdFilter.value.trim()
+        : "";
       if (traceIdFilter) {
         apiUrl += `&trace_id=${encodeURIComponent(traceIdFilter)}`;
       }
 
-      const timeFromFilter = this.timeFromFilter.value.trim();
+      const timeFromFilter = this.timeFromFilter
+        ? this.timeFromFilter.value.trim()
+        : "";
       if (timeFromFilter) {
         apiUrl += `&from=${encodeURIComponent(timeFromFilter)}`;
       }
 
-      const timeToFilter = this.timeToFilter.value.trim();
+      const timeToFilter = this.timeToFilter
+        ? this.timeToFilter.value.trim()
+        : "";
       if (timeToFilter) {
         apiUrl += `&to=${encodeURIComponent(timeToFilter)}`;
       }
@@ -128,18 +182,20 @@ class LogViewer {
     } catch (error) {
       console.error("Failed to apply filters:", error);
       this.showError("Error applying filters: " + error.message);
-      this.connectionStatus.textContent = "❌ Filter Error";
+      if (this.connectionStatus) {
+        this.connectionStatus.textContent = "❌ Filter Error";
+      }
       this.showLoading(false);
     }
   }
 
   clearAllFilters() {
-    this.sourceFilter.value = "";
-    this.levelFilter.value = "";
-    this.traceIdFilter.value = "";
-    this.timeFromFilter.value = "";
-    this.timeToFilter.value = "";
-    this.limitFilter.value = "100";
+    if (this.sourceFilter) this.sourceFilter.value = "";
+    if (this.levelFilter) this.levelFilter.value = "";
+    if (this.traceIdFilter) this.traceIdFilter.value = "";
+    if (this.timeFromFilter) this.timeFromFilter.value = "";
+    if (this.timeToFilter) this.timeToFilter.value = "";
+    if (this.limitFilter) this.limitFilter.value = "100";
 
     // Apply cleared filters
     this.applyFilters();
@@ -214,8 +270,12 @@ class LogViewer {
       };
 
       this.displayLogs(transformedData);
-      this.connectionStatus.textContent = `🎯 Found ${transformedData.total} logs (${transformedData.query_time_ms}ms)`;
-      this.lastUpdate.textContent = `Last update: ${new Date().toLocaleTimeString()}`;
+      if (this.connectionStatus) {
+        this.connectionStatus.textContent = `🎯 Found ${transformedData.total} logs (${transformedData.query_time_ms}ms)`;
+      }
+      if (this.lastUpdate) {
+        this.lastUpdate.textContent = `Last update: ${new Date().toLocaleTimeString()}`;
+      }
     } catch (error) {
       console.error("Failed to execute query:", error);
 
@@ -235,8 +295,8 @@ class LogViewer {
   }
 
   async loadLogs(page) {
-    // Use applyFilters instead of direct loading
-    this.applyFilters();
+    // Use applyFiltersWithPage for pagination
+    this.applyFiltersWithPage(page || 1);
   }
 
   async searchLogs(query, page) {
@@ -352,28 +412,47 @@ class LogViewer {
   }
 
   updatePaginationInfo(data) {
-    const totalPages = Math.ceil(data.total / this.pageSize);
+    const totalPages = Math.ceil((data.total || 0) / this.pageSize);
+    const currentPage = this.currentPage || 1;
 
-    this.logCount.textContent = `${data.total || 0} logs`;
-    this.pageInfo.textContent = `Page ${data.page || 1} / ${Math.max(
-      1,
-      totalPages
-    )}`;
+    if (this.logCount) {
+      this.logCount.textContent = `${data.total || 0} logs`;
+    }
 
-    this.prevPageBtn.disabled = !data.hasPrevious;
-    this.nextPageBtn.disabled = !data.hasNext;
+    if (this.pageInfo) {
+      this.pageInfo.textContent = `Page ${currentPage} / ${Math.max(
+        1,
+        totalPages
+      )}`;
+    }
+
+    // Update button states based on current page and total pages
+    if (this.prevPageBtn) {
+      this.prevPageBtn.disabled = currentPage <= 1;
+    }
+
+    if (this.nextPageBtn) {
+      this.nextPageBtn.disabled = currentPage >= totalPages || totalPages <= 1;
+    }
 
     // Hide pagination if only one page or no logs
-    this.pagination.style.display = totalPages <= 1 ? "none" : "flex";
+    if (this.pagination) {
+      this.pagination.style.display = totalPages <= 1 ? "none" : "flex";
+    }
   }
 
   navigateToPage(page) {
-    this.applyFilters();
+    if (this.isLoading) return;
+
+    this.currentPage = Math.max(1, page);
+    this.applyFiltersWithPage(this.currentPage);
   }
 
   showLoading(show) {
     this.isLoading = show;
-    this.loading.classList.toggle("active", show);
+    if (this.loading) {
+      this.loading.classList.toggle("active", show);
+    }
   }
 
   showError(message) {

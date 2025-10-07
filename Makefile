@@ -45,6 +45,30 @@ test:
 	@echo "🧪 Running with test logs..."
 	@go run ./cmd/seyir -test
 
+# Test pipe functionality
+test-pipe: build
+	@echo "🧪 Running seyir pipe tests..."
+	@./scripts/test_pipe.sh
+
+# Quick pipe test (simple test)
+test-pipe-quick: build
+	@echo "⚡ Quick pipe test..."
+	@echo "2025-01-07 10:00:00 [INFO] Quick test log 1" | ./bin/seyir
+	@echo "2025-01-07 10:00:01 [ERROR] Quick test error" | ./bin/seyir
+	@echo "2025-01-07 10:00:02 [WARN] Quick test warning" | ./bin/seyir
+	@echo "✅ Quick test completed"
+
+# Interactive pipe test
+test-pipe-interactive: build
+	@echo "🎮 Interactive pipe test - type logs and press Ctrl+C to stop"
+	@echo "Example: 2025-01-07 10:00:00 [INFO] Your message here"
+	@./bin/seyir
+
+# Simple pipe demo
+demo: build
+	@echo "🎬 Running seyir pipe demo..."
+	@./scripts/demo_pipe.sh
+
 # Force CLI mode (useful for testing on macOS)
 run-cli:
 	@echo "🖥️ Running in CLI mode..."
@@ -99,6 +123,12 @@ help:
 	@echo "   make clean         - Clean build artifacts"
 	@echo "   make run           - Run in development mode"
 	@echo "   make deps          - Install Go dependencies"
+	@echo ""
+	@echo "🧪 Test commands:"
+	@echo "   make demo                - Simple pipe demo"
+	@echo "   make test-pipe-quick     - Quick pipe functionality test"
+	@echo "   make test-pipe           - Comprehensive pipe tests (6 scenarios)"
+	@echo "   make test-pipe-interactive - Manual pipe testing"
 	@echo ""
 	@echo "🐳 Docker commands:"
 	@echo "   make docker-build  - Build Docker image"  

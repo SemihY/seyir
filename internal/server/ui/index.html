@@ -82,11 +82,43 @@
       gap: 0.5rem;
       flex-wrap: wrap;
     }
+    .table-container {
+      width: 100%;
+      max-height: 70vh;
+      overflow: auto;
+      margin-top: 1rem;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      box-shadow: 0 0 5px rgba(0,0,0,0.05);
+      scroll-behavior: smooth;
+    }
+    .table-container::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    .table-container::-webkit-scrollbar-track {
+      background: #f1f1f1;
+      border-radius: 4px;
+    }
+    .table-container::-webkit-scrollbar-thumb {
+      background: #c1c1c1;
+      border-radius: 4px;
+    }
+    .table-container::-webkit-scrollbar-thumb:hover {
+      background: #a8a8a8;
+    }
     table {
       width: 100%;
+      min-width: 800px;
       border-collapse: collapse;
       background: white;
-      box-shadow: 0 0 5px rgba(0,0,0,0.05);
+      margin: 0;
+    }
+    tbody tr:nth-child(even) {
+      background-color: #f9f9f9;
+    }
+    tbody tr:hover {
+      background-color: #f0f8ff;
     }
     th, td {
       border: 1px solid #ddd;
@@ -95,39 +127,109 @@
       text-align: left;
     }
     th {
-      background-color: #f0f0f0;
+      background-color: #f8f9fa;
       font-weight: 600;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      border-bottom: 2px solid #dee2e6;
     }
     .empty-state {
       text-align: center;
       color: #888;
       padding: 2rem;
     }
+    .timestamp {
+      white-space: nowrap;
+      font-family: monospace;
+      font-size: 0.8rem;
+    }
+    .message {
+      max-width: 400px;
+      word-wrap: break-word;
+      white-space: pre-wrap;
+    }
+    .source {
+      font-weight: 600;
+      color: #495057;
+    }
+    .trace-id {
+      font-family: monospace;
+      font-size: 0.8rem;
+    }
+    .trace-id-code {
+      background: #e9ecef;
+      padding: 0.1rem 0.3rem;
+      border-radius: 2px;
+      font-size: 0.75rem;
+    }
+    .tags {
+      max-width: 150px;
+    }
+    .tag {
+      background: #007bff;
+      color: white;
+      padding: 0.1rem 0.3rem;
+      border-radius: 2px;
+      font-size: 0.7rem;
+      margin-right: 0.2rem;
+      display: inline-block;
+    }
+    .log-level {
+      padding: 0.2rem 0.4rem;
+      border-radius: 3px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .log-level-info { background: #d4edda; color: #155724; }
+    .log-level-warn { background: #fff3cd; color: #856404; }
+    .log-level-error { background: #f8d7da; color: #721c24; }
+    .log-level-debug { background: #e2e3e5; color: #383d41; }
+    .log-level-fatal { background: #d1ecf1; color: #0c5460; }
     .pagination {
       margin-top: 0.75rem;
       display: flex;
-      justify-content: space-between;
+      justify-content: center;
       align-items: center;
+      gap: 1rem;
       font-size: 0.9rem;
       color: #555;
+    }
+    .pagination-info {
+      font-weight: 600;
     }
     .pagination-controls button {
       background-color: #007bff;
       color: white;
-      padding: 0.3rem 0.7rem;
+      padding: 0.4rem 0.8rem;
       margin-left: 0.3rem;
       margin-right: 0.3rem;
-      border-radius: 3px;
+      border-radius: 4px;
       border: none;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background-color 0.2s ease;
+    }
+    .pagination-controls button:hover:not(:disabled) {
+      background-color: #0056b3;
     }
     .pagination-controls button:disabled {
-      background-color: #aaa;
-      cursor: default;
+      background-color: #6c757d;
+      cursor: not-allowed;
+      opacity: 0.6;
     }
     .status {
       font-size: 0.85rem;
       color: #666;
       margin-left: 1rem;
+    }
+    #loading {
+      font-size: 0.85rem;
+      margin-left: 1rem;
+    }
+    #loading.active {
+      display: inline-block !important;
     }
   </style>
 </head>
@@ -203,33 +305,38 @@
     <div class="status" id="connectionStatus">Ready</div>
     <div class="status" id="lastUpdate">Last update: -</div>
     <div id="logCount">0 logs</div>
-    <div id="pageInfo" style="margin-left: 1rem;">Page 1 / 1</div>
+    <div id="loading" style="display: none; color: #007bff; font-weight: 600;">Loading...</div>
   </div>
 
-  <table aria-label="Log entries" style="margin-top: 1rem;">
-    <thead>
-      <tr>
-        <th style="width: 180px;">Timestamp</th>
-        <th style="width: 100px;">Level</th>
-        <th>Message</th>
-        <th style="width: 120px;">Source</th>
-        <th style="width: 120px;">Trace ID</th>
-        <th style="width: 100px;">Tags</th>
-      </tr>
-    </thead>
-    <tbody id="logContainer">
-      <tr>
-        <td colspan="6" class="empty-state">
-          Loading logs... Please wait, fetching optimized projection pushdown query...
-        </td>
-      </tr>
-    </tbody>
-  </table>
+  <div class="table-container">
+    <table aria-label="Log entries">
+      <thead>
+        <tr>
+          <th style="width: 180px;">Timestamp</th>
+          <th style="width: 100px;">Level</th>
+          <th>Message</th>
+          <th style="width: 120px;">Source</th>
+          <th style="width: 120px;">Trace ID</th>
+          <th style="width: 100px;">Tags</th>
+        </tr>
+      </thead>
+      <tbody id="logContainer">
+        <tr>
+          <td colspan="6" class="empty-state">
+            Loading logs... Please wait, fetching optimized projection pushdown query...
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
 
-  <div class="pagination" aria-label="Pagination controls">
+  <div id="pagination" class="pagination" aria-label="Pagination controls">
+    <div class="pagination-info">
+      <span id="pageInfo">Page 1 / 1</span>
+    </div>
     <div class="pagination-controls">
-      <button id="prevPage" disabled>Previous</button>
-      <button id="nextPage" disabled>Next</button>
+      <button id="prevPage" disabled>← Previous</button>
+      <button id="nextPage" disabled>Next →</button>
     </div>
   </div>
 
