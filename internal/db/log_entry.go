@@ -9,6 +9,9 @@ import (
 	"github.com/google/uuid"
 )
 
+// ANSI color code regex for cleaning log lines
+var ansiColorRegex = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
 type Level string
 
 const (
@@ -83,25 +86,103 @@ func NewLogEntryFromParsed(source string, parsed *ParsedLogData) *LogEntry {
 	return entry
 }
 
+// stripANSIColors removes ANSI color codes from log lines
+func stripANSIColors(text string) string {
+	return ansiColorRegex.ReplaceAllString(text, "")
+}
+
 // ParseLogLine attempts to extract structured data from a log line
 func ParseLogLine(line string) *ParsedLogData {
+	// Strip ANSI color codes first
+	cleanLine := stripANSIColors(line)
+	
 	parsed := &ParsedLogData{
-		Message: line,
+		Message: cleanLine,
 		Level:   INFO, // default level
 		Tags:    []string{},
 	}
 	
 	// Try to parse as JSON first
-	if strings.HasPrefix(strings.TrimSpace(line), "{") {
-		if jsonData := parseJSONLog(line); jsonData != nil {
+	if strings.HasPrefix(strings.TrimSpace(cleanLine), "{") {
+		if jsonData := parseJSONLog(cleanLine); jsonData != nil {
 			return jsonData
 		}
 	}
 	
+	// Check for JSON after timestamp prefix (e.g., "2025-10-07T11:55:19 {json}")
+	if strings.Contains(cleanLine, "{") {
+		// Find the first occurrence of '{'
+		jsonStart := strings.Index(cleanLine, "{")
+		if jsonStart != -1 {
+			jsonPart := cleanLine[jsonStart:]
+			if jsonData := parseJSONLog(jsonPart); jsonData != nil {
+				// If we successfully parsed JSON, but timestamp is missing, try to extract from prefix
+				if jsonData.Timestamp.IsZero() {
+					timestampPrefix := strings.TrimSpace(cleanLine[:jsonStart])
+					if t, err := time.Parse("2006-01-02T15:04:05", timestampPrefix); err == nil {
+						jsonData.Timestamp = t
+					}
+				}
+				return jsonData
+			}
+		}
+	}
+	
+	// Handle SQL query logs with ANSI colors (common in database logs)
+	if strings.Contains(cleanLine, "[query]") || 
+	   strings.Contains(strings.ToLower(cleanLine), "insert into") || 
+	   strings.Contains(strings.ToLower(cleanLine), "select ") || 
+	   strings.Contains(strings.ToLower(cleanLine), "update ") {
+		parseSQLLog(cleanLine, parsed)
+		return parsed
+	}
+	
 	// Parse structured text formats
-	parseStructuredText(line, parsed)
+	parseStructuredText(cleanLine, parsed)
 	
 	return parsed
+}
+
+// parseSQLLog handles SQL query logs with timing information
+func parseSQLLog(line string, parsed *ParsedLogData) {
+	parsed.Level = INFO
+	parsed.Message = line
+	parsed.Process = "database"
+	
+	// Initialize tags if not already done
+	if parsed.Tags == nil {
+		parsed.Tags = []string{}
+	}
+	
+	// Add SQL tag
+	parsed.Tags = append(parsed.Tags, "sql")
+	
+	// Extract timing information: [took X ms, Y results]
+	timingRegex := regexp.MustCompile(`\[took (\d+) ms(?:, (\d+) results?)?\]`)
+	if matches := timingRegex.FindStringSubmatch(line); len(matches) > 1 {
+		parsed.Tags = append(parsed.Tags, "duration:"+matches[1]+"ms")
+		if len(matches) > 2 && matches[2] != "" {
+			parsed.Tags = append(parsed.Tags, "results:"+matches[2])
+		}
+	}
+	
+	// Determine query type
+	lowerLine := strings.ToLower(line)
+	if strings.Contains(lowerLine, "insert into") {
+		parsed.Tags = append(parsed.Tags, "type:insert")
+	} else if strings.Contains(lowerLine, "select ") {
+		parsed.Tags = append(parsed.Tags, "type:select")
+	} else if strings.Contains(lowerLine, "update ") {
+		parsed.Tags = append(parsed.Tags, "type:update")
+	} else if strings.Contains(lowerLine, "delete ") {
+		parsed.Tags = append(parsed.Tags, "type:delete")
+	}
+	
+	// Extract table name for INSERT/UPDATE operations
+	tableRegex := regexp.MustCompile(`(?i)(?:insert into|update)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s`)
+	if matches := tableRegex.FindStringSubmatch(line); len(matches) > 1 {
+		parsed.Tags = append(parsed.Tags, "table:"+matches[1])
+	}
 }
 
 // parseJSONLog attempts to parse JSON-formatted log lines
@@ -115,7 +196,7 @@ func parseJSONLog(line string) *ParsedLogData {
 		Tags: []string{},
 	}
 	
-	// Extract common JSON log fields
+	// Extract timestamp - multiple formats supported
 	if ts, ok := jsonData["timestamp"].(string); ok {
 		if parsedTime, err := time.Parse(time.RFC3339, ts); err == nil {
 			parsed.Timestamp = parsedTime
@@ -130,12 +211,14 @@ func parseJSONLog(line string) *ParsedLogData {
 		}
 	}
 	
+	// Extract log level
 	if level, ok := jsonData["level"].(string); ok {
 		parsed.Level = parseLogLevel(level)
 	} else if level, ok := jsonData["severity"].(string); ok {
 		parsed.Level = parseLogLevel(level)
 	}
 	
+	// Extract message
 	if msg, ok := jsonData["message"].(string); ok {
 		parsed.Message = msg
 	} else if msg, ok := jsonData["msg"].(string); ok {
@@ -145,6 +228,7 @@ func parseJSONLog(line string) *ParsedLogData {
 		parsed.Message = line
 	}
 	
+	// Extract trace ID
 	if traceID, ok := jsonData["trace_id"].(string); ok {
 		parsed.TraceID = traceID
 	} else if traceID, ok := jsonData["traceId"].(string); ok {
@@ -153,34 +237,74 @@ func parseJSONLog(line string) *ParsedLogData {
 		parsed.TraceID = traceID
 	}
 	
-	if process, ok := jsonData["process"].(string); ok {
+	// Extract process/service - prioritize app_service 
+	if appService, ok := jsonData["app_service"].(string); ok {
+		parsed.Process = appService
+	} else if process, ok := jsonData["process"].(string); ok {
 		parsed.Process = process
-	} else if process, ok := jsonData["service"].(string); ok {
-		parsed.Process = process
+	} else if service, ok := jsonData["service"].(string); ok {
+		parsed.Process = service
 	}
 	
+	// Extract component
 	if component, ok := jsonData["component"].(string); ok {
 		parsed.Component = component
 	} else if component, ok := jsonData["logger"].(string); ok {
 		parsed.Component = component
 	}
 	
+	// Extract thread info
 	if thread, ok := jsonData["thread"].(string); ok {
 		parsed.Thread = thread
 	} else if thread, ok := jsonData["thread_id"].(string); ok {
 		parsed.Thread = thread
 	}
 	
+	// Extract user ID
 	if userID, ok := jsonData["user_id"].(string); ok {
 		parsed.UserID = userID
 	} else if userID, ok := jsonData["userId"].(string); ok {
 		parsed.UserID = userID
 	}
 	
+	// Extract request ID
 	if requestID, ok := jsonData["request_id"].(string); ok {
 		parsed.RequestID = requestID
 	} else if requestID, ok := jsonData["requestId"].(string); ok {
 		parsed.RequestID = requestID
+	}
+	
+	// Extract context as tag
+	if context, ok := jsonData["context"].(string); ok {
+		parsed.Tags = append(parsed.Tags, "context:"+context)
+	}
+	
+	// Extract company_id as tag
+	if companyID, ok := jsonData["company_id"].(string); ok {
+		parsed.Tags = append(parsed.Tags, "company:"+companyID)
+	}
+	
+	// Extract additional fields as tags
+	excludedFields := map[string]bool{
+		"timestamp": true, "time": true, "@timestamp": true,
+		"level": true, "severity": true,
+		"message": true, "msg": true,
+		"trace_id": true, "traceId": true, "correlation_id": true,
+		"app_service": true, "process": true, "service": true,
+		"component": true, "logger": true,
+		"thread": true, "thread_id": true,
+		"user_id": true, "userId": true,
+		"request_id": true, "requestId": true,
+		"context": true, "company_id": true,
+	}
+	
+	// Add any other fields as tags
+	for key, value := range jsonData {
+		if !excludedFields[key] {
+			if strValue, ok := value.(string); ok && strValue != "" {
+				parsed.Tags = append(parsed.Tags, key+":"+strValue)
+			}
+		}
 	}
 	
 	return parsed
