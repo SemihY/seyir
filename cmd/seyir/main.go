@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"seyir/internal/collector"
+	"seyir/internal/config"
 	"seyir/internal/db"
 	"seyir/internal/server"
 	"strconv"
@@ -107,10 +108,18 @@ func main() {
 	lakeDir := filepath.Join(dataDir, "lake")
 	db.SetGlobalLakeDir(lakeDir)
 	
-	// Initialize batch configuration (loads from file or uses defaults)
+	// Load global configuration at startup (falls back to defaults)
+	configPath := config.GetDefaultConfigPath(dataDir)
+	if err := config.LoadConfig(configPath); err != nil {
+		log.Printf("[WARN] Failed to load configuration from %s: %v", configPath, err)
+		log.Printf("[INFO] Using default configuration")
+	} else {
+		log.Printf("[INFO] Configuration loaded from %s", configPath)
+	}
+	
+	// Initialize batch configuration with loaded config
 	if err := db.LoadDefaultConfig(); err != nil {
-		log.Printf("[WARN] Failed to load batch configuration: %v", err)
-		log.Printf("[INFO] Using default batch configuration")
+		log.Printf("[WARN] Failed to initialize batch configuration: %v", err)
 	}
 	
 	// Attempt to recover any emergency buffer files from previous crashes

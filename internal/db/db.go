@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -26,14 +25,12 @@ var (
 // DB wraps sql.DB to provide a type in the core package
 type DB struct {
 	*sql.DB
-	sessionID      string    // Session ID for this pipe operation
-	parquetPath    string    // Path to the Parquet file for this session
-	createdAt      time.Time // When this session was created
-	lastActivity   time.Time // Last time this session was used
-	processInfo    string    // Information about the process using this session
-	pendingEntries int       // Number of entries waiting to be flushed
-	lastFlush      time.Time // Last time data was flushed to Parquet
-	batchBuffer    *BatchBuffer // Batch buffer for this session
+	sessionID    string       // Session ID for this pipe operation
+	parquetPath  string       // Path to the Parquet file for this session
+	createdAt    time.Time    // When this session was created
+	lastActivity time.Time    // Last time this session was used
+	processInfo  string       // Information about the process using this session
+	batchBuffer  *BatchBuffer // Batch buffer for this session
 }
 
 // SetGlobalLakeDir sets the global lake directory where all session DBs are stored
@@ -102,14 +99,12 @@ func NewSessionConnection() (*DB, error) {
 	// Initialize database wrapper with session info
 	now := time.Now()
 	dbWrapper := &DB{
-		DB:             db,
-		sessionID:      sessionID,
-		parquetPath:    filepath.Join(lakeDir, fmt.Sprintf("session_%s.parquet", sessionID)),
-		createdAt:      now,
-		lastActivity:   now,
-		processInfo:    processInfo,
-		pendingEntries: 0,
-		lastFlush:      now,
+		DB:           db,
+		sessionID:    sessionID,
+		parquetPath:  filepath.Join(lakeDir, fmt.Sprintf("session_%s.parquet", sessionID)),
+		createdAt:    now,
+		lastActivity: now,
+		processInfo:  processInfo,
 	}
 
 	// Initialize batch buffer with default configuration
@@ -236,28 +231,8 @@ func convertTagsToArray(tags []string) interface{} {
 }
 
 func SaveLog(db *DB, e *LogEntry) {
-	// Use batch buffer if available, otherwise fall back to direct save
-	if db.batchBuffer != nil {
-		if err := db.batchBuffer.Add(e); err != nil {
-			log.Printf("[ERROR] failed to add log to batch buffer: %v", err)
-			// Fall back to direct save on error
-			saveLogDirect(db, e)
-		}
-	} else {
-		saveLogDirect(db, e)
-	}
-}
-
-// saveLogDirect saves log directly to the in-memory table (fallback method)
-func saveLogDirect(db *DB, e *LogEntry) {
-	// Convert tags slice for DuckDB
-	tagsArray := convertTagsToArray(e.Tags)
-	
-	// Insert into in-memory table with extended fields
-	_, err := db.Exec(`INSERT INTO logs (ts, source, level, message, id, trace_id, process, component, thread, user_id, request_id, tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, 
-		e.Ts, e.Source, e.Level, e.Message, e.ID, e.TraceID, e.Process, e.Component, e.Thread, e.UserID, e.RequestID, tagsArray)
-	if err != nil { 
-		log.Printf("[ERROR] failed to save log to memory: %v", err) 
+	if err := db.SaveLogDirectly(e); err != nil {
+		log.Printf("[ERROR] failed to save log: %v", err)
 	}
 }
 
@@ -275,140 +250,7 @@ func (db *DB) SaveLogDirectly(e *LogEntry) error {
 		return db.batchBuffer.Add(e)
 	}
 	
-	// Fall back to old method if batch buffer is not available
-	return db.saveLogDirectlyLegacy(e)
-}
-
-// saveLogDirectlyLegacy is the old direct save method (kept for backward compatibility)
-func (db *DB) saveLogDirectlyLegacy(e *LogEntry) error {
-	// Convert tags slice for DuckDB
-	tagsArray := convertTagsToArray(e.Tags)
-	
-	// Insert into in-memory table first with extended fields
-	_, err := db.Exec(`INSERT INTO logs (ts, source, level, message, id, trace_id, process, component, thread, user_id, request_id, tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, 
-		e.Ts, e.Source, e.Level, e.Message, e.ID, e.TraceID, e.Process, e.Component, e.Thread, e.UserID, e.RequestID, tagsArray)
-	if err != nil {
-		return fmt.Errorf("failed to insert into memory table: %v", err)
-	}
-	
-	db.pendingEntries++
-	
-	// Flush conditions: 
-	// Since DuckDB APPEND mode has issues, we use larger batches and final flush
-	// 1. Every 50 entries for reasonable memory usage
-	// 2. Every 10 seconds to prevent data loss for long-running processes
-	shouldFlush := db.pendingEntries >= 50 || 
-		time.Since(db.lastFlush) >= 10*time.Second
-	
-	if shouldFlush {
-		return db.flushToParquet()
-	}
-	
-	return nil
-}
-
-// flushToParquet writes all pending entries to the Parquet file
-func (db *DB) flushToParquet() error {
-	if db.pendingEntries == 0 {
-		return nil // Nothing to flush
-	}
-	
-	// Check how many entries we're about to flush
-	var count int
-	err := db.QueryRow("SELECT COUNT(*) FROM logs").Scan(&count)
-	if err != nil {
-		return fmt.Errorf("failed to count logs before flush: %v", err)
-	}
-	
-	if count == 0 {
-		db.pendingEntries = 0
-		return nil // Nothing to flush
-	}
-	
-	// Check if the Parquet file exists
-	fileExists := false
-	if _, err := os.Stat(db.parquetPath); err == nil {
-		fileExists = true
-	}
-	
-	// Export to compressed Parquet
-	var exportSQL string
-	if fileExists {
-		// Since APPEND mode has issues, implement manual append by reading existing data
-		// First, read existing data into a temporary table
-		_, err = db.Exec("CREATE TEMPORARY TABLE existing_logs AS SELECT * FROM read_parquet(?)", db.parquetPath)
-		if err != nil {
-			return fmt.Errorf("failed to read existing parquet data: %v", err)
-		}
-		
-		// Insert existing data into our logs table (before new data)
-		_, err = db.Exec("INSERT INTO logs SELECT * FROM existing_logs")
-		if err != nil {
-			return fmt.Errorf("failed to merge existing data: %v", err)
-		}
-		
-		// Drop temporary table
-		db.Exec("DROP TABLE existing_logs")
-		
-		// Update count to reflect total entries
-		err = db.QueryRow("SELECT COUNT(*) FROM logs").Scan(&count)
-		if err != nil {
-			return fmt.Errorf("failed to count merged logs: %v", err)
-		}
-		
-		log.Printf("[DEBUG] Merged with existing data, total entries: %d", count)
-	}
-	
-	// Write all data (existing + new) with compression from config
-	compression := getCurrentCompressionSetting()
-	exportSQL = fmt.Sprintf("COPY logs TO '%s' (FORMAT PARQUET, COMPRESSION '%s')", db.parquetPath, strings.ToUpper(compression))
-	
-	log.Printf("[DEBUG] Flushing %d entries to %s (file exists: %t)", count, filepath.Base(db.parquetPath), fileExists)
-	
-	_, err = db.Exec(exportSQL)
-	if err != nil {
-		return fmt.Errorf("failed to write to parquet file %s: %v", db.parquetPath, err)
-	}
-	
-	// Clear the in-memory table after successful write
-	_, err = db.Exec("DELETE FROM logs")
-	if err != nil {
-		log.Printf("[WARN] Failed to clear memory table: %v", err)
-	}
-	
-	// Update flush tracking
-	db.pendingEntries = 0
-	db.lastFlush = time.Now()
-	
-	log.Printf("[DEBUG] Successfully flushed %d entries to %s", count, filepath.Base(db.parquetPath))
-	return nil
-}
-
-// FlushToParquet exports all logs from the in-memory table to a Parquet file
-func (db *DB) FlushToParquet() error {
-	if db.parquetPath == "" {
-		return fmt.Errorf("no parquet path set for this session")
-	}
-	
-	// Check if there are any rows to export
-	var count int
-	err := db.QueryRow("SELECT COUNT(*) FROM logs").Scan(&count)
-	if err != nil {
-		return fmt.Errorf("failed to count logs: %v", err)
-	}
-	
-	if count == 0 {
-		return nil // Nothing to flush
-	}
-	
-	// Export the in-memory logs table to Parquet (append mode)
-	exportSQL := fmt.Sprintf("COPY logs TO '%s' (FORMAT PARQUET, APPEND)", db.parquetPath)
-	_, err = db.Exec(exportSQL)
-	if err != nil {
-		return fmt.Errorf("failed to export logs to parquet file %s: %v", db.parquetPath, err)
-	}
-	
-	return nil
+	return fmt.Errorf("batch buffer not available for session")
 }
 
 // ClearMemoryTable removes all entries from the in-memory logs table
@@ -479,17 +321,7 @@ func (db *DB) CloseSession() error {
 		}
 	}
 	
-	// Also check for any data in the legacy in-memory table
-	var count int
-	err := db.QueryRow("SELECT COUNT(*) FROM logs").Scan(&count)
-	if err != nil {
-		log.Printf("[WARN] Failed to check remaining entries on close: %v", err)
-	} else if count > 0 {
-		log.Printf("[INFO] Flushing %d remaining entries from legacy table on session close", count)
-		if err := db.flushToParquet(); err != nil {
-			log.Printf("[ERROR] Failed to flush remaining data on close: %v", err)
-		}
-	}
+	// Batch buffer handles all flushing, no need for legacy checks
 	
 	if db.sessionID != "" {
 		sessionsMutex.Lock()

@@ -6,11 +6,19 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"seyir/internal/config"
 	"strings"
 	"time"
 
 	_ "github.com/marcboeker/go-duckdb/v2"
 )
+
+// debugLog prints debug information only if query debug logging is enabled
+func debugLog(format string, args ...interface{}) {
+	if config.IsQueryDebugEnabled() {
+		log.Printf("[DEBUG] "+format, args...)
+	}
+}
 
 // QueryFilter represents search filters for efficient querying
 // Focused on UI needs: ts, level, message, trace_id, source, tags
@@ -73,7 +81,7 @@ func FastQuery(filter *QueryFilter) (*QueryResult, error) {
 		}, nil
 	}
 	
-	log.Printf("[DEBUG] FastQuery scanning %d parquet files with pattern: %s", len(matches), parquetPattern)
+	debugLog("FastQuery scanning %d parquet files with pattern: %s", len(matches), parquetPattern)
 	
 	// Build efficient SQL query with projection pushdown
 	// Only select the columns needed by UI for maximum performance
@@ -81,7 +89,8 @@ func FastQuery(filter *QueryFilter) (*QueryResult, error) {
 		SELECT ts, level, message, 
 		       COALESCE(trace_id, '') as trace_id,
 		       source, 
-		       COALESCE(tags, []) as tags
+		       COALESCE(tags, []) as tags,
+		       id
 		FROM read_parquet('%s')`, parquetPattern)
 	
 	// Build WHERE clause with efficient filters
@@ -139,8 +148,8 @@ func FastQuery(filter *QueryFilter) (*QueryResult, error) {
 		finalSQL += " WHERE " + strings.Join(whereConditions, " AND ")
 	}
 	
-	// Add ordering and pagination
-	finalSQL += " ORDER BY ts DESC"
+	// Add deterministic ordering for consistent pagination
+	finalSQL += " ORDER BY ts DESC, id ASC"
 	if filter.Limit > 0 {
 		finalSQL += " LIMIT ?"
 		args = append(args, filter.Limit)
@@ -151,8 +160,8 @@ func FastQuery(filter *QueryFilter) (*QueryResult, error) {
 		}
 	}
 	
-	log.Printf("[DEBUG] FastQuery SQL: %s", finalSQL)
-	log.Printf("[DEBUG] FastQuery args: %v", args)
+	debugLog("FastQuery SQL: %s", finalSQL)
+	debugLog("FastQuery args: %v", args)
 	
 	// Execute query
 	rows, err := db.Query(finalSQL, args...)
@@ -168,7 +177,7 @@ func FastQuery(filter *QueryFilter) (*QueryResult, error) {
 		var tagsArray interface{}
 		
 		// Scan only the projected columns for maximum performance
-		err := rows.Scan(&e.Ts, &e.Level, &e.Message, &e.TraceID, &e.Source, &tagsArray)
+		err := rows.Scan(&e.Ts, &e.Level, &e.Message, &e.TraceID, &e.Source, &tagsArray, &e.ID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan result: %v", err)
 		}

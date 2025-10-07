@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"seyir/internal/config"
 	"strings"
 	"sync"
 	"time"
@@ -19,13 +20,14 @@ type BatchConfig struct {
 	EnableAsync   bool          // Enable async flush operations
 }
 
-// DefaultBatchConfig returns sensible defaults
+// DefaultBatchConfig returns sensible defaults from global config
 func DefaultBatchConfig() *BatchConfig {
+	cfg := config.GetBatchBuffer()
 	return &BatchConfig{
-		FlushInterval: 5 * time.Second,
-		BatchSize:     10000,
-		MaxMemory:     100 * 1024 * 1024, // 100MB
-		EnableAsync:   true,
+		FlushInterval: time.Duration(cfg.FlushIntervalSeconds) * time.Second,
+		BatchSize:     cfg.BatchSize,
+		MaxMemory:     int64(cfg.MaxMemoryMB) * 1024 * 1024, // Convert MB to bytes
+		EnableAsync:   cfg.EnableAsync,
 	}
 }
 
