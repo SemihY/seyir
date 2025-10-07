@@ -69,7 +69,7 @@ func DefaultConfigFile() *BatchConfigFile {
 		}{
 			MaxFileSizeMB: 50,
 			MaxFiles:      10,
-			Compression:   "snappy",
+			Compression:   "zstd",
 		},
 		Retention: struct {
 			Enabled         bool    `json:"enabled"`
@@ -251,6 +251,22 @@ func InitializeBatchConfigFromFile(configPath string) error {
 		config.Retention.CleanupHours, config.Retention.DryRun)
 	
 	return nil
+}
+
+// getCurrentCompressionSetting returns the current compression setting from config
+func getCurrentCompressionSetting() string {
+	// Try to load current config
+	config, err := LoadConfigFromFile(DefaultConfigPath)
+	if err != nil {
+		// Fallback to default if config loading fails
+		return "zstd"
+	}
+	
+	compression := config.FileRotation.Compression
+	if compression == "" {
+		return "zstd" // Default fallback
+	}
+	return compression
 }
 
 // GetConfigExample returns an example configuration as a string

@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -59,6 +60,7 @@ type FileRotation struct {
 	baseDir        string
 	maxFileSize    int64
 	maxFiles       int
+	compression    string // Compression type: "zstd", "snappy", "gzip", "uncompressed"
 	currentSize    int64
 	currentFileNum int
 	currentFile    string  // Cache current file path
@@ -66,12 +68,13 @@ type FileRotation struct {
 }
 
 // NewFileRotation creates a new file rotation manager
-func NewFileRotation(processName, baseDir string, maxFileSize int64, maxFiles int) *FileRotation {
+func NewFileRotation(processName, baseDir string, maxFileSize int64, maxFiles int, compression string) *FileRotation {
 	return &FileRotation{
 		processName:    processName,
 		baseDir:        baseDir,
 		maxFileSize:    maxFileSize,
 		maxFiles:       maxFiles,
+		compression:    compression,
 		currentFileNum: 1,
 	}
 }
@@ -228,6 +231,7 @@ func NewBatchBuffer(db *DB, config *BatchConfig) *BatchBuffer {
 		lakeDir,
 		int64(configFile.FileRotation.MaxFileSizeMB)*1024*1024, // Config'den al
 		configFile.FileRotation.MaxFiles,                       // Config'den al
+		configFile.FileRotation.Compression,                    // Config'den al
 	)
 	
 	bb := &BatchBuffer{
@@ -462,8 +466,12 @@ func (bb *BatchBuffer) writeEntriesToFile(entries []*LogEntry, filePath string) 
 		tempDB.Exec("DROP TABLE existing_logs")
 	}
 	
-	// Export to parquet with compression
-	exportSQL := fmt.Sprintf("COPY logs TO '%s' (FORMAT PARQUET, COMPRESSION 'SNAPPY')", filePath)
+	// Export to parquet with compression from config
+	compression := bb.fileRotation.compression
+	if compression == "" {
+		compression = "zstd" // Default to ZSTD if not specified
+	}
+	exportSQL := fmt.Sprintf("COPY logs TO '%s' (FORMAT PARQUET, COMPRESSION '%s')", filePath, strings.ToUpper(compression))
 	_, err = tempDB.Exec(exportSQL)
 	if err != nil {
 		return fmt.Errorf("failed to export to parquet: %v", err)

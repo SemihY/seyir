@@ -188,11 +188,19 @@ class LogViewer {
 
   async executeQuery(apiUrl) {
     try {
+      console.log("Executing query:", apiUrl);
+      this.connectionStatus.textContent = "🔍 Querying...";
+
       const response = await fetch(apiUrl);
+      console.log("Response status:", response.status);
+
       const data = await response.json();
+      console.log("Response data:", data);
 
       if (!response.ok) {
-        throw new Error(data.error || "Failed to execute query");
+        throw new Error(
+          data.error || `HTTP ${response.status}: Failed to execute query`
+        );
       }
 
       // Transform data format to match existing UI expectations
@@ -202,15 +210,25 @@ class LogViewer {
         page: 1,
         hasNext: false,
         hasPrevious: false,
+        query_time_ms: data.query_time_ms || 0,
       };
 
       this.displayLogs(transformedData);
-      this.connectionStatus.textContent = `🎯 Filtered (${data.query_time_ms}ms)`;
+      this.connectionStatus.textContent = `🎯 Found ${transformedData.total} logs (${transformedData.query_time_ms}ms)`;
       this.lastUpdate.textContent = `Last update: ${new Date().toLocaleTimeString()}`;
     } catch (error) {
       console.error("Failed to execute query:", error);
-      this.showError("Query execution failed: " + error.message);
-      this.connectionStatus.textContent = "❌ Query Error";
+
+      // Check if it's a network error
+      if (error instanceof TypeError && error.message.includes("fetch")) {
+        this.showError(
+          "Network Error: Cannot connect to server. Is the seyir server running?"
+        );
+        this.connectionStatus.textContent = "❌ Server Offline";
+      } else {
+        this.showError("Query execution failed: " + error.message);
+        this.connectionStatus.textContent = "❌ Query Error";
+      }
     } finally {
       this.showLoading(false);
     }
@@ -264,7 +282,7 @@ class LogViewer {
       };
 
       this.displayLogs(transformedData);
-      this.connectionStatus.textContent = `� Found (${data.query_time_ms}ms)`;
+      this.connectionStatus.textContent = `Found (${data.query_time_ms}ms)`;
       this.lastUpdate.textContent = `Last update: ${new Date().toLocaleTimeString()}`;
     } catch (error) {
       console.error("Failed to search logs:", error);

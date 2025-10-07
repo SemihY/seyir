@@ -9,7 +9,7 @@
   "file_rotation": {
     "max_file_size_mb": 50,
     "max_files": 50,
-    "compression": "snappy"
+    "compression": "zstd"
   },
   "retention": {
     "enabled": true,

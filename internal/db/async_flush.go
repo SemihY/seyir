@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -233,9 +234,15 @@ func (afm *AsyncFlushManager) performFlush(task *FlushTask) error {
 		tempDB.Exec("DROP TABLE existing_logs")
 	}
 	
-	// Export to parquet with optimized compression
-	// Use ZSTD compression equivalent settings in DuckDB
-	exportSQL := fmt.Sprintf("COPY logs TO '%s' (FORMAT PARQUET, COMPRESSION 'SNAPPY', ROW_GROUP_SIZE 131072)", task.FilePath)
+	// Export to parquet with compression from config
+	compression := "zstd" // Default to ZSTD
+	if task.Buffer != nil && task.Buffer.fileRotation != nil {
+		compression = task.Buffer.fileRotation.compression
+	}
+	if compression == "" {
+		compression = "zstd" // Fallback to ZSTD if not specified
+	}
+	exportSQL := fmt.Sprintf("COPY logs TO '%s' (FORMAT PARQUET, COMPRESSION '%s', ROW_GROUP_SIZE 131072)", task.FilePath, strings.ToUpper(compression))
 	_, err = tempDB.Exec(exportSQL)
 	if err != nil {
 		return fmt.Errorf("failed to export to parquet: %v", err)

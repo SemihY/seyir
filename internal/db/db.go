@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -358,8 +359,9 @@ func (db *DB) flushToParquet() error {
 		log.Printf("[DEBUG] Merged with existing data, total entries: %d", count)
 	}
 	
-	// Write all data (existing + new) with compression
-	exportSQL = fmt.Sprintf("COPY logs TO '%s' (FORMAT PARQUET, COMPRESSION 'SNAPPY')", db.parquetPath)
+	// Write all data (existing + new) with compression from config
+	compression := getCurrentCompressionSetting()
+	exportSQL = fmt.Sprintf("COPY logs TO '%s' (FORMAT PARQUET, COMPRESSION '%s')", db.parquetPath, strings.ToUpper(compression))
 	
 	log.Printf("[DEBUG] Flushing %d entries to %s (file exists: %t)", count, filepath.Base(db.parquetPath), fileExists)
 	
