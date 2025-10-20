@@ -84,7 +84,12 @@ func (dc *DockerCollector) Start(ctx context.Context) error {
 func (dc *DockerCollector) Stop() error {
 	dc.RequestStop()
 	dc.stopAllContainers()
-	return dc.Close()
+	return nil
+}
+
+// Close closes any resources
+func (dc *DockerCollector) Close() error {
+	return nil
 }
 
 // Name returns the collector name
@@ -382,7 +387,12 @@ func (clc *ContainerLogCollector) Stop() error {
 		clc.cmd.Process.Kill()
 	}
 	
-	return clc.Close()
+	return nil
+}
+
+// Close closes any resources
+func (clc *ContainerLogCollector) Close() error {
+	return nil
 }
 
 // Name returns the container name
@@ -395,8 +405,8 @@ func (clc *ContainerLogCollector) IsHealthy() bool {
 	return clc.IsRunning()
 }
 
-// Legacy functions for backward compatibility
-func StartDockerDiscovery(database *db.DB) {
+// Legacy functions for backward compatibility (deprecated - DB no longer used)
+func StartDockerDiscovery() {
 	collector := NewDockerCollector()
 	if collector == nil {
 		log.Printf("[ERROR] Failed to create Docker collector")
@@ -406,7 +416,7 @@ func StartDockerDiscovery(database *db.DB) {
 	collector.Start(ctx)
 }
 
-func CaptureDockerLogs(database *db.DB, containerName string) {
+func CaptureDockerLogs(containerName string) {
 	collector := NewContainerLogCollector(containerName)
 	if collector == nil {
 		log.Printf("[ERROR] Failed to create container collector for %s", containerName)

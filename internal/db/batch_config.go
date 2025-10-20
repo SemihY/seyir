@@ -10,123 +10,93 @@ import (
 
 // BatchConfigFile represents the structure of the batch configuration file
 type BatchConfigFile struct {
-	BatchBuffer struct {
-		FlushIntervalSeconds int  `json:"flush_interval_seconds"`
-		BatchSize           int  `json:"batch_size"`
-		MaxMemoryMB         int  `json:"max_memory_mb"`
-		EnableAsync         bool `json:"enable_async"`
-		WorkerCount         int  `json:"worker_count"`
-	} `json:"batch_buffer"`
+	UltraLight struct {
+		Enabled               bool `json:"enabled"`
+		BufferSize            int  `json:"buffer_size"`
+		ExportIntervalSeconds int  `json:"export_interval_seconds"`
+		MaxMemoryMB           int  `json:"max_memory_mb"`
+		UseUltraFastMode      bool `json:"use_ultra_fast_mode"`
+	} `json:"ultra_light"`
 	
-	FileRotation struct {
-		MaxFileSizeMB int    `json:"max_file_size_mb"`
-		MaxFiles      int    `json:"max_files"`
-		Compression   string `json:"compression"`
-	} `json:"file_rotation"`
+	Compaction struct {
+		Enabled               bool  `json:"enabled"`
+		IntervalHours         int   `json:"interval_hours"`
+		MinFilesForCompaction int   `json:"min_files_for_compaction"`
+		MaxCompactedSizeMB    int64 `json:"max_compacted_size_mb"`
+	} `json:"compaction"`
 	
 	Retention struct {
-		Enabled         bool    `json:"enabled"`
-		RetentionDays   int     `json:"retention_days"`
-		CleanupHours    int     `json:"cleanup_hours"`
-		MaxFilesPerScan int     `json:"max_files_per_scan"`
-		DryRun          bool    `json:"dry_run"`
-		KeepMinFiles    int     `json:"keep_min_files"`
-		MaxTotalSizeGB  float64 `json:"max_total_size_gb"`
+		Enabled        bool    `json:"enabled"`
+		RetentionDays  int     `json:"retention_days"`
+		CleanupHours   int     `json:"cleanup_hours"`
+		KeepMinFiles   int     `json:"keep_min_files"`
+		MaxTotalSizeGB float64 `json:"max_total_size_gb"`
 	} `json:"retention"`
 	
-	ProcessDirs struct {
-		UseProcessName bool   `json:"use_process_name"`
-		BasePath       string `json:"base_path"`
-	} `json:"process_dirs"`
-	
 	Server struct {
-		Port           string `json:"port"`
-		EnableCORS     bool   `json:"enable_cors"`
-		EnableDebug    bool   `json:"enable_debug"`
+		Port       string `json:"port"`
+		EnableCORS bool   `json:"enable_cors"`
 	} `json:"server"`
 }
 
 // DefaultConfigFile returns a default configuration
 func DefaultConfigFile() *BatchConfigFile {
 	return &BatchConfigFile{
-		BatchBuffer: struct {
-			FlushIntervalSeconds int  `json:"flush_interval_seconds"`
-			BatchSize           int  `json:"batch_size"`
-			MaxMemoryMB         int  `json:"max_memory_mb"`
-			EnableAsync         bool `json:"enable_async"`
-			WorkerCount         int  `json:"worker_count"`
+		UltraLight: struct {
+			Enabled               bool `json:"enabled"`
+			BufferSize            int  `json:"buffer_size"`
+			ExportIntervalSeconds int  `json:"export_interval_seconds"`
+			MaxMemoryMB           int  `json:"max_memory_mb"`
+			UseUltraFastMode      bool `json:"use_ultra_fast_mode"`
 		}{
-			FlushIntervalSeconds: 5,
-			BatchSize:           10000,
-			MaxMemoryMB:         100,
-			EnableAsync:         true,
-			WorkerCount:         3,
+			Enabled:               true,
+			BufferSize:            10000,
+			ExportIntervalSeconds: 30,
+			MaxMemoryMB:           50,
+			UseUltraFastMode:      false,
 		},
-		FileRotation: struct {
-			MaxFileSizeMB int    `json:"max_file_size_mb"`
-			MaxFiles      int    `json:"max_files"`
-			Compression   string `json:"compression"`
+		Compaction: struct {
+			Enabled               bool  `json:"enabled"`
+			IntervalHours         int   `json:"interval_hours"`
+			MinFilesForCompaction int   `json:"min_files_for_compaction"`
+			MaxCompactedSizeMB    int64 `json:"max_compacted_size_mb"`
 		}{
-			MaxFileSizeMB: 50,
-			MaxFiles:      10,
-			Compression:   "zstd",
+			Enabled:               true,
+			IntervalHours:         4,
+			MinFilesForCompaction: 10,
+			MaxCompactedSizeMB:    50,
 		},
 		Retention: struct {
-			Enabled         bool    `json:"enabled"`
-			RetentionDays   int     `json:"retention_days"`
-			CleanupHours    int     `json:"cleanup_hours"`
-			MaxFilesPerScan int     `json:"max_files_per_scan"`
-			DryRun          bool    `json:"dry_run"`
-			KeepMinFiles    int     `json:"keep_min_files"`
-			MaxTotalSizeGB  float64 `json:"max_total_size_gb"`
+			Enabled        bool    `json:"enabled"`
+			RetentionDays  int     `json:"retention_days"`
+			CleanupHours   int     `json:"cleanup_hours"`
+			KeepMinFiles   int     `json:"keep_min_files"`
+			MaxTotalSizeGB float64 `json:"max_total_size_gb"`
 		}{
-			Enabled:         false, // Disabled by default
-			RetentionDays:   30,
-			CleanupHours:    1, // Check every hour
-			MaxFilesPerScan: 1000,
-			DryRun:          false,
-			KeepMinFiles:    5,
-			MaxTotalSizeGB:  10.0,
-		},
-		ProcessDirs: struct {
-			UseProcessName bool   `json:"use_process_name"`
-			BasePath       string `json:"base_path"`
-		}{
-			UseProcessName: true,
-			BasePath:       "logs",
+			Enabled:        true,
+			RetentionDays:  30,
+			CleanupHours:   1,
+			KeepMinFiles:   100,
+			MaxTotalSizeGB: 10.0,
 		},
 		Server: struct {
-			Port           string `json:"port"`
-			EnableCORS     bool   `json:"enable_cors"`
-			EnableDebug    bool   `json:"enable_debug"`
+			Port       string `json:"port"`
+			EnableCORS bool   `json:"enable_cors"`
 		}{
-			Port:           "5555",
-			EnableCORS:     true,
-			EnableDebug:    false,
+			Port:       "5555",
+			EnableCORS: true,
 		},
-	}
-}
-
-// ToBatchConfig converts the config file to a BatchConfig
-func (cf *BatchConfigFile) ToBatchConfig() *BatchConfig {
-	return &BatchConfig{
-		FlushInterval: time.Duration(cf.BatchBuffer.FlushIntervalSeconds) * time.Second,
-		BatchSize:     cf.BatchBuffer.BatchSize,
-		MaxMemory:     int64(cf.BatchBuffer.MaxMemoryMB) * 1024 * 1024,
-		EnableAsync:   cf.BatchBuffer.EnableAsync,
 	}
 }
 
 // ToRetentionConfig converts the config file to a RetentionConfig
 func (cf *BatchConfigFile) ToRetentionConfig() *RetentionConfig {
 	return &RetentionConfig{
-		Enabled:          cf.Retention.Enabled,
-		RetentionDays:    cf.Retention.RetentionDays,
-		CleanupInterval:  time.Duration(cf.Retention.CleanupHours) * time.Hour,
-		MaxFilesPerScan:  cf.Retention.MaxFilesPerScan,
-		DryRun:           cf.Retention.DryRun,
-		KeepMinFiles:     cf.Retention.KeepMinFiles,
-		MaxTotalSizeGB:   cf.Retention.MaxTotalSizeGB,
+		Enabled:         cf.Retention.Enabled,
+		RetentionDays:   cf.Retention.RetentionDays,
+		CleanupInterval: time.Duration(cf.Retention.CleanupHours) * time.Hour,
+		KeepMinFiles:    cf.Retention.KeepMinFiles,
+		MaxTotalSizeGB:  cf.Retention.MaxTotalSizeGB,
 	}
 }
 
@@ -185,40 +155,43 @@ func SaveConfigToFile(configPath string, config *BatchConfigFile) error {
 
 // validateConfig validates the configuration values
 func validateConfig(config *BatchConfigFile) error {
-	if config.BatchBuffer.FlushIntervalSeconds < 1 {
-		return fmt.Errorf("flush_interval_seconds must be at least 1")
+	// Validate UltraLight settings (relaxed validation)
+	if config.UltraLight.BufferSize < 10 {
+		return fmt.Errorf("ultra_light.buffer_size must be at least 10")
 	}
 	
-	if config.BatchBuffer.BatchSize < 1 {
-		return fmt.Errorf("batch_size must be at least 1")
+	if config.UltraLight.ExportIntervalSeconds < 1 {
+		return fmt.Errorf("ultra_light.export_interval_seconds must be at least 1")
 	}
 	
-	if config.BatchBuffer.MaxMemoryMB < 1 {
-		return fmt.Errorf("max_memory_mb must be at least 1")
+	if config.UltraLight.MaxMemoryMB < 1 {
+		return fmt.Errorf("ultra_light.max_memory_mb must be at least 1")
 	}
 	
-	if config.BatchBuffer.WorkerCount < 1 {
-		return fmt.Errorf("worker_count must be at least 1")
+	// Validate Compaction settings
+	if config.Compaction.Enabled {
+		if config.Compaction.IntervalHours < 1 {
+			return fmt.Errorf("compaction.interval_hours must be at least 1")
+		}
+		
+		if config.Compaction.MinFilesForCompaction < 2 {
+			return fmt.Errorf("compaction.min_files_for_compaction must be at least 2")
+		}
 	}
 	
-	if config.FileRotation.MaxFileSizeMB < 1 {
-		return fmt.Errorf("max_file_size_mb must be at least 1")
-	}
-	
-	if config.FileRotation.MaxFiles < 1 {
-		return fmt.Errorf("max_files must be at least 1")
-	}
-	
-	if config.Retention.RetentionDays < 1 && config.Retention.Enabled {
-		return fmt.Errorf("retention_days must be at least 1 when retention is enabled")
-	}
-	
-	if config.Retention.CleanupHours < 1 && config.Retention.Enabled {
-		return fmt.Errorf("cleanup_hours must be at least 1 when retention is enabled")
-	}
-	
-	if config.Retention.KeepMinFiles < 1 {
-		return fmt.Errorf("keep_min_files must be at least 1")
+	// Validate Retention settings
+	if config.Retention.Enabled {
+		if config.Retention.RetentionDays < 1 {
+			return fmt.Errorf("retention.retention_days must be at least 1")
+		}
+		
+		if config.Retention.CleanupHours < 1 {
+			return fmt.Errorf("retention.cleanup_hours must be at least 1")
+		}
+		
+		if config.Retention.KeepMinFiles < 1 {
+			return fmt.Errorf("retention.keep_min_files must be at least 1")
+		}
 	}
 	
 	return nil
@@ -231,42 +204,23 @@ func InitializeBatchConfigFromFile(configPath string) error {
 		return err
 	}
 	
-	// Apply batch buffer configuration
-	batchConfig := config.ToBatchConfig()
-	globalBatchManager.SetDefaultConfig(batchConfig)
-	
 	// Apply retention configuration
 	retentionConfig := config.ToRetentionConfig()
 	retentionManager := GetRetentionManager()
 	retentionManager.UpdateConfig(retentionConfig)
 	
 	fmt.Printf("[INFO] Configuration loaded from %s\n", configPath)
-	fmt.Printf("[INFO] Batch: flush=%ds, size=%d, memory=%dMB, async=%t, workers=%d\n", 
-		config.BatchBuffer.FlushIntervalSeconds, config.BatchBuffer.BatchSize, 
-		config.BatchBuffer.MaxMemoryMB, config.BatchBuffer.EnableAsync, config.BatchBuffer.WorkerCount)
-	fmt.Printf("[INFO] Rotation: max_size=%dMB, max_files=%d, compression=%s\n",
-		config.FileRotation.MaxFileSizeMB, config.FileRotation.MaxFiles, config.FileRotation.Compression)
-	fmt.Printf("[INFO] Retention: enabled=%t, days=%d, cleanup_hours=%d, dry_run=%t\n",
+	fmt.Printf("[INFO] UltraLight: enabled=%t, buffer=%d, interval=%ds, memory=%dMB, ultra_fast=%t\n", 
+		config.UltraLight.Enabled, config.UltraLight.BufferSize,
+		config.UltraLight.ExportIntervalSeconds, config.UltraLight.MaxMemoryMB, config.UltraLight.UseUltraFastMode)
+	fmt.Printf("[INFO] Compaction: enabled=%t, interval=%dh, min_files=%d, max_size=%dMB\n",
+		config.Compaction.Enabled, config.Compaction.IntervalHours, 
+		config.Compaction.MinFilesForCompaction, config.Compaction.MaxCompactedSizeMB)
+	fmt.Printf("[INFO] Retention: enabled=%t, days=%d, cleanup_hours=%d, keep_min=%d\n",
 		config.Retention.Enabled, config.Retention.RetentionDays, 
-		config.Retention.CleanupHours, config.Retention.DryRun)
+		config.Retention.CleanupHours, config.Retention.KeepMinFiles)
 	
 	return nil
-}
-
-// getCurrentCompressionSetting returns the current compression setting from config
-func getCurrentCompressionSetting() string {
-	// Try to load current config
-	config, err := LoadConfigFromFile(DefaultConfigPath)
-	if err != nil {
-		// Fallback to default if config loading fails
-		return "zstd"
-	}
-	
-	compression := config.FileRotation.Compression
-	if compression == "" {
-		return "zstd" // Default fallback
-	}
-	return compression
 }
 
 // GetConfigExample returns an example configuration as a string
@@ -301,10 +255,6 @@ func LoadDefaultConfig() error {
 	// If no config file found, use defaults and create one
 	config := DefaultConfigFile()
 	
-	// Apply batch buffer configuration
-	batchConfig := config.ToBatchConfig()
-	globalBatchManager.SetDefaultConfig(batchConfig)
-	
 	// Apply retention configuration
 	retentionConfig := config.ToRetentionConfig()
 	retentionManager := GetRetentionManager()
@@ -315,6 +265,6 @@ func LoadDefaultConfig() error {
 		fmt.Printf("[INFO] Created default configuration file at %s\n", DefaultConfigPath)
 	}
 	
-	fmt.Printf("[INFO] Using default configuration\n")
+	fmt.Printf("[INFO] Using default UltraLight configuration\n")
 	return nil
 }

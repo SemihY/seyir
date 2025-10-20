@@ -5,7 +5,6 @@ import (
 	"log"
 	"seyir/internal/db"
 	"seyir/internal/tail"
-	"strings"
 )
 
 // LogSource represents a source of logs (stdin, docker, file, etc.)
@@ -16,7 +15,7 @@ type LogSource interface {
 	// Stop gracefully stops log collection
 	Stop() error
 	
-	// Close closes any resources (like database connections)
+	// Close closes any resources
 	Close() error
 	
 	// Name returns a human-readable name for this source
@@ -28,24 +27,14 @@ type LogSource interface {
 
 // BaseCollector provides common functionality for all log sources
 type BaseCollector struct {
-	database   *db.DB
 	sourceName string
 	isRunning  bool
 	stopChan   chan struct{}
 }
 
 // NewBaseCollector creates a new base collector
-// Each collector gets its own DuckDB session file (e.g., logs_session_123.duckdb)
 func NewBaseCollector(sourceName string) *BaseCollector {
-	// Create a new DuckDB session for this collector
-	database, err := db.NewSessionConnection()
-	if err != nil {
-		log.Printf("[ERROR] Failed to create session connection for %s: %v", sourceName, err)
-		return nil
-	}
-	
 	return &BaseCollector{
-		database:   database,
 		sourceName: sourceName,
 		stopChan:   make(chan struct{}),
 	}
@@ -53,29 +42,48 @@ func NewBaseCollector(sourceName string) *BaseCollector {
 
 // SaveAndBroadcast saves a log entry and broadcasts it to connected clients
 func (bc *BaseCollector) SaveAndBroadcast(entry *db.LogEntry) {
-	// Save directly to Parquet for immediate persistence
-	if err := bc.database.SaveLogDirectly(entry); err != nil {
-		log.Printf("[ERROR] Failed to save log to Parquet: %v", err)
-		// Fallback: save to memory table
-		db.SaveLog(bc.database, entry)
+	processName := entry.Source
+	if processName == "" {
+		processName = bc.sourceName
 	}
 	
-	// Broadcast to live viewers
+	manager := db.GetUltraLightLoggerManager()
+	logger, err := manager.GetOrCreateLogger(processName)
+	if err != nil {
+		log.Printf("[ERROR] Failed to get/create UltraLight logger: %v", err)
+		return
+	}
+	
+	if err := logger.AddEntry(entry); err != nil {
+		log.Printf("[ERROR] UltraLight logger failed to add entry: %v", err)
+		return
+	}
+	
 	tail.BroadcastLog(entry)
 }
 
 // ParseLogLevel attempts to detect the log level from the message
 func (bc *BaseCollector) ParseLogLevel(message string) db.Level {
-	switch {
-	case containsIgnoreCase(message, "[ERROR]", "ERROR:", "error:", "FATAL", "fatal"):
-		return db.ERROR
-	case containsIgnoreCase(message, "[WARN]", "WARN:", "warn:", "WARNING", "warning"):
-		return db.WARN
-	case containsIgnoreCase(message, "[DEBUG]", "DEBUG:", "debug:", "TRACE", "trace"):
-		return db.DEBUG
-	default:
-		return db.INFO
+	msg := message // Simple conversion for now
+	_ = msg
+	
+	// Check for common log level patterns
+	for _, pattern := range []string{"[ERROR]", "ERROR:", "error:", "FATAL", "fatal"} {
+		if contains(message, pattern) {
+			return db.ERROR
+		}
 	}
+	for _, pattern := range []string{"[WARN]", "WARN:", "warn:", "WARNING", "warning"} {
+		if contains(message, pattern) {
+			return db.WARN
+		}
+	}
+	for _, pattern := range []string{"[DEBUG]", "DEBUG:", "debug:", "TRACE", "trace"} {
+		if contains(message, pattern) {
+			return db.DEBUG
+		}
+	}
+	return db.INFO
 }
 
 // IsRunning returns true if the collector is currently running
@@ -99,19 +107,16 @@ func (bc *BaseCollector) RequestStop() {
 	bc.isRunning = false
 }
 
-// Close closes the database connection and cleans up the session
-func (bc *BaseCollector) Close() error {
-	if bc.database != nil {
-		return bc.database.CloseSession()
-	}
-	return nil
+// contains checks if text contains pattern (case-sensitive for performance)
+func contains(text, pattern string) bool {
+	return len(text) >= len(pattern) && 
+		(text[:len(pattern)] == pattern || 
+		 len(text) > len(pattern) && findInString(text, pattern))
 }
 
-// containsIgnoreCase checks if any of the patterns exist in the text (case insensitive)
-func containsIgnoreCase(text string, patterns ...string) bool {
-	textLower := strings.ToLower(text)
-	for _, pattern := range patterns {
-		if strings.Contains(textLower, strings.ToLower(pattern)) {
+func findInString(text, pattern string) bool {
+	for i := 0; i <= len(text)-len(pattern); i++ {
+		if text[i:i+len(pattern)] == pattern {
 			return true
 		}
 	}

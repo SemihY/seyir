@@ -20,6 +20,17 @@ func debugLog(format string, args ...interface{}) {
 	}
 }
 
+// ColumnarQuery represents a columnar search query
+type ColumnarQuery struct {
+	TraceID   string    `json:"trace_id"`
+	Level     string    `json:"level"`
+	Process   string    `json:"process"`
+	Source    string    `json:"source"`
+	StartTime time.Time `json:"start_time"`
+	EndTime   time.Time `json:"end_time"`
+	Limit     int       `json:"limit"`
+}
+
 // QueryFilter represents search filters for efficient querying
 // Focused on UI needs: ts, level, message, trace_id, source, tags
 type QueryFilter struct {
@@ -66,9 +77,9 @@ func FastQuery(filter *QueryFilter) (*QueryResult, error) {
 	}
 	defer db.Close()
 	
-	// Use glob pattern to read all parquet files across all process directories
-	// This enables partition pruning when time filters are used
-	parquetPattern := filepath.Join(lakeDir, "*", "*.parquet")
+	// Use glob pattern to read all parquet files in Hive partitioned structure
+	// This enables efficient partition pruning when time filters are used
+	parquetPattern := filepath.Join(lakeDir, "*", "year=*", "month=*", "day=*", "hour=*", "*.parquet")
 	
 	// Check if any files exist
 	matches, err := filepath.Glob(parquetPattern)
@@ -89,7 +100,7 @@ func FastQuery(filter *QueryFilter) (*QueryResult, error) {
 		SELECT ts, level, message, 
 		       COALESCE(trace_id, '') as trace_id,
 		       source, 
-		       COALESCE(tags, []) as tags,
+		       tags,
 		       id
 		FROM read_parquet('%s')`, parquetPattern)
 	
@@ -174,18 +185,19 @@ func FastQuery(filter *QueryFilter) (*QueryResult, error) {
 	var entries []*LogEntry
 	for rows.Next() {
 		var e LogEntry
-		var tagsArray interface{}
+		var tagsStr sql.NullString
 		
 		// Scan only the projected columns for maximum performance
-		err := rows.Scan(&e.Ts, &e.Level, &e.Message, &e.TraceID, &e.Source, &tagsArray, &e.ID)
+		err := rows.Scan(&e.Ts, &e.Level, &e.Message, &e.TraceID, &e.Source, &tagsStr, &e.ID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan result: %v", err)
 		}
 		
-		// Convert tags array
-		if tagsArray != nil {
-			if tags, ok := tagsArray.([]string); ok {
-				e.Tags = tags
+		// Convert tags from comma-separated string back to array
+		if tagsStr.Valid && tagsStr.String != "" {
+			e.Tags = strings.Split(tagsStr.String, ",")
+			for i := range e.Tags {
+				e.Tags[i] = strings.TrimSpace(e.Tags[i])
 			}
 		}
 		
@@ -221,8 +233,8 @@ func FastCount(filter *QueryFilter) (int64, error) {
 	}
 	defer db.Close()
 	
-	// Use glob pattern to read all parquet files
-	parquetPattern := filepath.Join(lakeDir, "*", "*.parquet")
+	// Use glob pattern to read all parquet files in Hive partitioned structure
+	parquetPattern := filepath.Join(lakeDir, "*", "year=*", "month=*", "day=*", "hour=*", "*.parquet")
 	
 	// Check if any files exist
 	matches, err := filepath.Glob(parquetPattern)
@@ -314,8 +326,8 @@ func GetDistinctValues(column string, limit int) ([]string, error) {
 	}
 	defer db.Close()
 	
-	// Use glob pattern to read all parquet files
-	parquetPattern := filepath.Join(lakeDir, "*", "*.parquet")
+	// Use glob pattern to read all parquet files in Hive partitioned structure
+	parquetPattern := filepath.Join(lakeDir, "*", "year=*", "month=*", "day=*", "hour=*", "*.parquet")
 	
 	// Check if any files exist
 	matches, err := filepath.Glob(parquetPattern)
@@ -377,8 +389,8 @@ func GetTimeRange() (*time.Time, *time.Time, error) {
 	}
 	defer db.Close()
 	
-	// Use glob pattern to read all parquet files
-	parquetPattern := filepath.Join(lakeDir, "*", "*.parquet")
+	// Use glob pattern to read all parquet files in Hive partitioned structure
+	parquetPattern := filepath.Join(lakeDir, "*", "year=*", "month=*", "day=*", "hour=*", "*.parquet")
 	
 	// Check if any files exist
 	matches, err := filepath.Glob(parquetPattern)
@@ -421,8 +433,8 @@ func GetQueryStats() (*QueryStats, error) {
 		return nil, fmt.Errorf("global lake directory not set")
 	}
 	
-	// Get file statistics
-	matches, err := filepath.Glob(filepath.Join(lakeDir, "*", "*.parquet"))
+	// Get file statistics for Hive partitioned structure
+	matches, err := filepath.Glob(filepath.Join(lakeDir, "*", "year=*", "month=*", "day=*", "hour=*", "*.parquet"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to glob files: %v", err)
 	}
@@ -448,7 +460,7 @@ func GetQueryStats() (*QueryStats, error) {
 	}
 	defer db.Close()
 	
-	parquetPattern := filepath.Join(lakeDir, "*", "*.parquet")
+	parquetPattern := filepath.Join(lakeDir, "*", "year=*", "month=*", "day=*", "hour=*", "*.parquet")
 	
 	// Get comprehensive statistics in a single query
 	sql := fmt.Sprintf(`
@@ -482,4 +494,139 @@ func GetQueryStats() (*QueryStats, error) {
 		UniqueLevels:    uniqueLevels,
 		QueryTime:       time.Since(start),
 	}, nil
+}
+
+// SearchParquetWithDuckDB performs a search on parquet files using DuckDB
+// This replaces the metadata index approach with direct DuckDB queries
+func SearchParquetWithDuckDB(processName string, query ColumnarQuery) ([]*LogEntry, error) {
+	start := time.Now()
+	baseDir := GetGlobalLakeDir()
+	
+	// Build the parquet file pattern
+	// Pattern: ~/.seyir/lake/processName/**/*.parquet
+	parquetPattern := filepath.Join(baseDir, processName, "**", "*.parquet")
+	
+	// Create a temporary DuckDB connection for the query
+	db, err := sql.Open("duckdb", "")
+	if err != nil {
+		return nil, fmt.Errorf("failed to open DuckDB: %v", err)
+	}
+	defer db.Close()
+	
+	// Build WHERE clause
+	var whereClauses []string
+	var args []interface{}
+	argIdx := 1
+	
+	if query.TraceID != "" {
+		whereClauses = append(whereClauses, fmt.Sprintf("trace_id = $%d", argIdx))
+		args = append(args, query.TraceID)
+		argIdx++
+	}
+	
+	if query.Level != "" {
+		whereClauses = append(whereClauses, fmt.Sprintf("level = $%d", argIdx))
+		args = append(args, query.Level)
+		argIdx++
+	}
+	
+	if query.Source != "" {
+		whereClauses = append(whereClauses, fmt.Sprintf("source = $%d", argIdx))
+		args = append(args, query.Source)
+		argIdx++
+	}
+	
+	if !query.StartTime.IsZero() {
+		whereClauses = append(whereClauses, fmt.Sprintf("ts >= $%d", argIdx))
+		args = append(args, query.StartTime)
+		argIdx++
+	}
+	
+	if !query.EndTime.IsZero() {
+		whereClauses = append(whereClauses, fmt.Sprintf("ts <= $%d", argIdx))
+		args = append(args, query.EndTime)
+		argIdx++
+	}
+	
+	whereClause := ""
+	if len(whereClauses) > 0 {
+		whereClause = "WHERE " + strings.Join(whereClauses, " AND ")
+	}
+	
+	// Set default limit
+	limit := query.Limit
+	if limit <= 0 {
+		limit = 1000
+	}
+	
+	// Build DuckDB query using read_parquet with glob pattern
+	sqlQuery := fmt.Sprintf(`
+		SELECT 
+			ts, source, level, message, id, trace_id, 
+			process, component, thread, user_id, request_id, tags
+		FROM read_parquet('%s', union_by_name=true, filename=true)
+		%s
+		ORDER BY ts DESC
+		LIMIT %d
+	`, parquetPattern, whereClause, limit)
+	
+	debugLog("Executing DuckDB query: %s", sqlQuery)
+	debugLog("Query args: %v", args)
+	
+	// Execute query
+	rows, err := db.Query(sqlQuery, args...)
+	if err != nil {
+		return nil, fmt.Errorf("DuckDB query failed: %v", err)
+	}
+	defer rows.Close()
+	
+	// Parse results
+	var results []*LogEntry
+	for rows.Next() {
+		entry := &LogEntry{}
+		var tagsStr sql.NullString
+		
+		err := rows.Scan(
+			&entry.Ts,
+			&entry.Source,
+			&entry.Level,
+			&entry.Message,
+			&entry.ID,
+			&entry.TraceID,
+			&entry.Process,
+			&entry.Component,
+			&entry.Thread,
+			&entry.UserID,
+			&entry.RequestID,
+			&tagsStr,
+		)
+		
+		if err != nil {
+			log.Printf("[WARN] Failed to scan row: %v", err)
+			continue
+		}
+		
+		// Parse tags if present
+		if tagsStr.Valid && tagsStr.String != "" {
+			// DuckDB array format: ['tag1', 'tag2']
+			tagsStr.String = strings.Trim(tagsStr.String, "[]")
+			if tagsStr.String != "" {
+				entry.Tags = strings.Split(tagsStr.String, ",")
+				for i := range entry.Tags {
+					entry.Tags[i] = strings.Trim(entry.Tags[i], " '\"")
+				}
+			}
+		}
+		
+		results = append(results, entry)
+	}
+	
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating rows: %v", err)
+	}
+	
+	duration := time.Since(start)
+	log.Printf("[INFO] DuckDB search completed: %d results in %v", len(results), duration)
+	
+	return results, nil
 }

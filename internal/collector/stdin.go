@@ -108,7 +108,12 @@ func (sc *StdinCollector) Start(ctx context.Context) error {
 // Stop gracefully stops the stdin collector
 func (sc *StdinCollector) Stop() error {
 	sc.RequestStop()
-	return sc.Close()
+	return nil
+}
+
+// Close closes any resources
+func (sc *StdinCollector) Close() error {
+	return nil
 }
 
 // Name returns the collector name
@@ -121,8 +126,8 @@ func (sc *StdinCollector) IsHealthy() bool {
 	return sc.IsRunning()
 }
 
-// Legacy function for backward compatibility
-func CaptureStdin(database *db.DB, source string) {
+// Legacy function for backward compatibility (deprecated - DB no longer used)
+func CaptureStdin(source string) {
 	collector := NewStdinCollector(source)
 	if collector == nil {
 		log.Printf("[ERROR] Failed to create stdin collector for %s", source)

@@ -62,10 +62,7 @@ func (s *Server) Start() error {
 	// API endpoint for distinct values
 	http.HandleFunc("/api/query/distinct", s.serveDistinctAPI)
 	
-	// Register batch buffer management endpoints
-	db.RegisterBatchHandlers(http.DefaultServeMux)
-	
-	// API endpoint for system health including batch buffers
+	// API endpoint for system health
 	http.HandleFunc("/api/health", s.serveHealthAPI)
 	
 	// Start server
@@ -143,6 +140,13 @@ func (s *Server) serveQueryAPI(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	
+	// Parse offset
+	if offsetStr := query.Get("offset"); offsetStr != "" {
+		if offset, err := strconv.Atoi(offsetStr); err == nil && offset >= 0 {
+			filter.Offset = offset
+		}
+	}
+	
 	// Execute fast query
 	result, err := db.FastQuery(filter)
 	if err != nil {
@@ -157,6 +161,8 @@ func (s *Server) serveQueryAPI(w http.ResponseWriter, r *http.Request) {
 		"query_time_ms": result.QueryTime.Milliseconds(),
 		"files_scanned": result.FilesScanned,
 		"limit":         filter.Limit,
+		"offset":        filter.Offset,
+		"returned":      len(result.Entries),
 	}
 	
 	json.NewEncoder(w).Encode(response)
@@ -232,23 +238,14 @@ func parseTimeParam(timeStr string) (*time.Time, error) {
 func (s *Server) serveHealthAPI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	
-	// Get batch buffer health
-	batchHealth := db.BatchBufferHealthCheck()
-	
 	// Get session information
 	sessions := db.GetActiveSessions()
 	
 	// Combine health information
 	health := map[string]interface{}{
-		"status":         "ok",
-		"batch_buffers":  batchHealth,
+		"status":          "ok",
 		"active_sessions": len(sessions),
-		"sessions":       sessions,
-	}
-	
-	// Determine overall health status
-	if batchBufferHealthy, ok := batchHealth["healthy"].(bool); !ok || !batchBufferHealthy {
-		health["status"] = "warning"
+		"sessions":        sessions,
 	}
 	
 	json.NewEncoder(w).Encode(health)

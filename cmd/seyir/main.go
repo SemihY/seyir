@@ -40,6 +40,7 @@ Usage:
 Commands:
     service     Start log collection service (Docker containers + Web UI)
     web         Start web server only 
+    search      Search logs with filters (DuckDB-powered)
     sessions    Show active log sessions
     cleanup     Clean up old log sessions
     batch       Manage batch buffer settings and statistics
@@ -122,12 +123,6 @@ func main() {
 		log.Printf("[WARN] Failed to initialize batch configuration: %v", err)
 	}
 	
-	// Attempt to recover any emergency buffer files from previous crashes
-	asyncManager := db.GetAsyncFlushManager()
-	if err := asyncManager.RecoverEmergencyBuffers(); err != nil {
-		log.Printf("[WARN] Failed to recover emergency buffers: %v", err)
-	}
-	
 	args := flag.Args()
 	
 	// If no command provided, check for pipe mode or show help
@@ -147,6 +142,12 @@ func main() {
 		runServiceMode(*port)
 	case "web":
 		runWebServer(*port)
+	case "search":
+		if len(args) < 2 {
+			runSearchUsage()
+			os.Exit(1)
+		}
+		runSearchCommand(args[1:])
 	case "query":
 		if len(args) < 2 {
 			runQueryUsage()
@@ -226,9 +227,12 @@ func runPipeMode() {
 		log.Printf("[INFO] Stdin collection completed")
 	}
 
-	// Stop collectors and cleanup batch buffers to flush remaining data
+	// Stop collectors and cleanup
 	collectorManager.StopAll()
-	db.CleanupBatchBuffers()
+	
+	// Cleanup ultra-light loggers
+	db.CleanupUltraLightLoggers()
+	
 	log.Printf("[INFO] Pipe operation completed")
 }
 
@@ -331,8 +335,8 @@ func runServiceMode(port string) {
 		// First stop collectors
 		collectorManager.StopAll()
 		
-		// Then cleanup batch buffers to flush any remaining data
-		db.CleanupBatchBuffers()
+		// Then cleanup ultra-light loggers to export any remaining data
+		db.CleanupUltraLightLoggers()
 		
 		log.Printf("[INFO] ✅ Graceful shutdown completed")
 	}
@@ -357,16 +361,10 @@ Examples:
     seyir batch config get
 
     # Set flush interval to 3 seconds
-    seyir batch config set flush_interval 3
+    seyir batch config set export_interval 60
 
-    # Set batch size to 5000
-    seyir batch config set batch_size 5000
-
-    # Show buffer statistics
-    seyir batch stats
-
-    # Force flush all buffers
-    seyir batch flush
+    # Set buffer size to 5000
+    seyir batch config set buffer_size 5000
 
     # Enable retention (30 days)
     seyir batch retention enable
@@ -389,10 +387,6 @@ func runBatchCommand(args []string) {
 	switch command {
 	case "config":
 		runBatchConfig(args[1:])
-	case "stats":
-		runBatchStats()
-	case "flush":
-		runBatchFlush()
 	case "retention":
 		runBatchRetention(args[1:])
 	case "example":
@@ -437,13 +431,24 @@ func runBatchConfigGet() {
 		return
 	}
 
-	fmt.Println("Current Batch Buffer Configuration:")
-	fmt.Printf("  Flush Interval: %d seconds\n", config.BatchBuffer.FlushIntervalSeconds)
-	fmt.Printf("  Batch Size: %d logs\n", config.BatchBuffer.BatchSize)
-	fmt.Printf("  Max Memory: %d MB\n", config.BatchBuffer.MaxMemoryMB)
-	fmt.Printf("  Async Enabled: %t\n", config.BatchBuffer.EnableAsync)
-	fmt.Printf("  Max File Size: %d MB\n", config.FileRotation.MaxFileSizeMB)
-	fmt.Printf("  Max Files: %d\n", config.FileRotation.MaxFiles)
+	fmt.Println("Current UltraLight Configuration:")
+	fmt.Printf("  Enabled: %t\n", config.UltraLight.Enabled)
+	fmt.Printf("  Buffer Size: %d entries\n", config.UltraLight.BufferSize)
+	fmt.Printf("  Export Interval: %d seconds\n", config.UltraLight.ExportIntervalSeconds)
+	fmt.Printf("  Max Memory: %d MB\n", config.UltraLight.MaxMemoryMB)
+	fmt.Printf("  Ultra Fast Mode: %t\n", config.UltraLight.UseUltraFastMode)
+	
+	fmt.Println("\nCompaction Configuration:")
+	fmt.Printf("  Enabled: %t\n", config.Compaction.Enabled)
+	fmt.Printf("  Interval: %d hours\n", config.Compaction.IntervalHours)
+	fmt.Printf("  Min Files: %d\n", config.Compaction.MinFilesForCompaction)
+	fmt.Printf("  Max Size: %d MB\n", config.Compaction.MaxCompactedSizeMB)
+	
+	fmt.Println("\nRetention Configuration:")
+	fmt.Printf("  Enabled: %t\n", config.Retention.Enabled)
+	fmt.Printf("  Retention Days: %d\n", config.Retention.RetentionDays)
+	fmt.Printf("  Cleanup Hours: %d\n", config.Retention.CleanupHours)
+	fmt.Printf("  Keep Min Files: %d\n", config.Retention.KeepMinFiles)
 }
 
 func runBatchConfigSet(key, value string) {
@@ -456,51 +461,51 @@ func runBatchConfigSet(key, value string) {
 
 	// Update the specified key
 	switch key {
-	case "flush_interval":
-		if val, err := strconv.Atoi(value); err == nil && val >= 1 {
-			config.BatchBuffer.FlushIntervalSeconds = val
+	case "buffer_size":
+		if val, err := strconv.Atoi(value); err == nil && val >= 100 {
+			config.UltraLight.BufferSize = val
 		} else {
-			fmt.Printf("Invalid flush_interval value: %s (must be >= 1)\n", value)
+			fmt.Printf("Invalid buffer_size value: %s (must be >= 100)\n", value)
 			return
 		}
-	case "batch_size":
+	case "export_interval":
 		if val, err := strconv.Atoi(value); err == nil && val >= 1 {
-			config.BatchBuffer.BatchSize = val
+			config.UltraLight.ExportIntervalSeconds = val
 		} else {
-			fmt.Printf("Invalid batch_size value: %s (must be >= 1)\n", value)
+			fmt.Printf("Invalid export_interval value: %s (must be >= 1)\n", value)
 			return
 		}
 	case "max_memory_mb":
 		if val, err := strconv.Atoi(value); err == nil && val >= 1 {
-			config.BatchBuffer.MaxMemoryMB = val
+			config.UltraLight.MaxMemoryMB = val
 		} else {
 			fmt.Printf("Invalid max_memory_mb value: %s (must be >= 1)\n", value)
 			return
 		}
-	case "enable_async":
+	case "ultra_fast_mode":
 		if val, err := strconv.ParseBool(value); err == nil {
-			config.BatchBuffer.EnableAsync = val
+			config.UltraLight.UseUltraFastMode = val
 		} else {
-			fmt.Printf("Invalid enable_async value: %s (must be true or false)\n", value)
+			fmt.Printf("Invalid ultra_fast_mode value: %s (must be true or false)\n", value)
 			return
 		}
-	case "max_file_size_mb":
+	case "compaction_interval":
 		if val, err := strconv.Atoi(value); err == nil && val >= 1 {
-			config.FileRotation.MaxFileSizeMB = val
+			config.Compaction.IntervalHours = val
 		} else {
-			fmt.Printf("Invalid max_file_size_mb value: %s (must be >= 1)\n", value)
+			fmt.Printf("Invalid compaction_interval value: %s (must be >= 1)\n", value)
 			return
 		}
-	case "max_files":
+	case "retention_days":
 		if val, err := strconv.Atoi(value); err == nil && val >= 1 {
-			config.FileRotation.MaxFiles = val
+			config.Retention.RetentionDays = val
 		} else {
-			fmt.Printf("Invalid max_files value: %s (must be >= 1)\n", value)
+			fmt.Printf("Invalid retention_days value: %s (must be >= 1)\n", value)
 			return
 		}
 	default:
 		fmt.Printf("Unknown configuration key: %s\n", key)
-		fmt.Println("Available keys: flush_interval, batch_size, max_memory_mb, enable_async, max_file_size_mb, max_files")
+		fmt.Println("Available keys: buffer_size, export_interval, max_memory_mb, ultra_fast_mode, compaction_interval, retention_days")
 		return
 	}
 
@@ -512,57 +517,6 @@ func runBatchConfigSet(key, value string) {
 
 	fmt.Printf("Configuration updated: %s = %s\n", key, value)
 	fmt.Println("Restart seyir for changes to take effect.")
-}
-
-func runBatchStats() {
-	stats := db.GetBatchBufferStats()
-	
-	if len(stats) == 0 {
-		fmt.Println("No active batch buffers found.")
-	} else {
-		fmt.Printf("Batch Buffer Statistics (%d active buffers):\n", len(stats))
-		fmt.Printf("%-20s %-10s %-10s %-12s %-12s %-12s %-20s\n", 
-			"PROCESS", "BUF_SIZE", "CAPACITY", "TOTAL_LOGS", "FLUSHES", "ERRORS", "LAST_FLUSH")
-		fmt.Printf("%s\n", "--------------------------------------------------------------------------------------------------------")
-
-		for processName, stat := range stats {
-			lastFlushStr := "Never"
-			if !stat.LastFlush.IsZero() {
-				lastFlushStr = stat.LastFlush.Format("15:04:05")
-			}
-
-			fmt.Printf("%-20s %-10d %-10d %-12d %-12d %-12d %-20s\n",
-				processName,
-				stat.BufferSize,
-				stat.BufferCapacity,
-				stat.TotalLogs,
-				stat.TotalFlushes,
-				stat.FlushErrors,
-				lastFlushStr)
-		}
-	}
-	
-	// Show async flush manager stats
-	fmt.Printf("\nAsync Flush Manager Statistics:\n")
-	asyncManager := db.GetAsyncFlushManager()
-	asyncStats := asyncManager.GetStats()
-	
-	fmt.Printf("  Queue: %d/%d entries\n", asyncStats.QueueLength, asyncStats.QueueCapacity)
-	fmt.Printf("  Total Flushes: %d\n", asyncStats.TotalFlushes)
-	fmt.Printf("  Total Errors: %d\n", asyncStats.TotalErrors)
-	fmt.Printf("  Last Flush: %s\n", asyncStats.LastFlush.Format("15:04:05"))
-	fmt.Printf("  Workers Active: %t\n", asyncStats.WorkersActive)
-}
-
-func runBatchFlush() {
-	fmt.Println("Flushing all batch buffers...")
-	
-	if err := db.FlushAllBuffers(); err != nil {
-		fmt.Printf("Error flushing buffers: %v\n", err)
-		return
-	}
-
-	fmt.Println("All batch buffers flushed successfully.")
 }
 
 func runBatchRetention(args []string) {
@@ -951,4 +905,143 @@ func runQueryStats() {
 	fmt.Printf("Unique Sources: %d\n", stats.UniqueSources)
 	fmt.Printf("Unique Levels: %d\n", stats.UniqueLevels)
 	fmt.Printf("Query Time: %v\n", stats.QueryTime)
+}
+
+// runSearchUsage shows search command usage
+func runSearchUsage() {
+	fmt.Println(`Usage: seyir search [flags]
+
+Flags:
+  --process <name>      Filter by process name
+  --trace-id <id>       Filter by trace ID
+  --level <level>       Filter by log level (INFO, WARN, ERROR, DEBUG)
+  --source <source>     Filter by source
+  --since <duration>    Filter by time (e.g., 1h, 30m, 2h30m)
+  --start <time>        Start time (RFC3339 format)
+  --end <time>          End time (RFC3339 format)
+  --limit <n>           Maximum number of results (default: 1000)
+
+Examples:
+  # Search for errors in a specific process
+  seyir search --process myapp --level ERROR --limit 100
+
+  # Search by trace ID
+  seyir search --trace-id abc-123-def
+
+  # Search logs from last 2 hours
+  seyir search --level WARN --since 2h
+
+  # Search with time range
+  seyir search --start 2025-10-21T00:00:00Z --end 2025-10-21T12:00:00Z
+`)
+}
+
+// runSearchCommand performs a DuckDB-powered search on parquet files
+func runSearchCommand(args []string) {
+	// Parse flags
+	searchFlags := flag.NewFlagSet("search", flag.ExitOnError)
+	processName := searchFlags.String("process", "", "Process name")
+	traceID := searchFlags.String("trace-id", "", "Trace ID")
+	level := searchFlags.String("level", "", "Log level")
+	source := searchFlags.String("source", "", "Source")
+	since := searchFlags.String("since", "", "Time duration (e.g., 1h, 30m)")
+	startTime := searchFlags.String("start", "", "Start time (RFC3339)")
+	endTime := searchFlags.String("end", "", "End time (RFC3339)")
+	limit := searchFlags.Int("limit", 1000, "Result limit")
+
+	searchFlags.Parse(args)
+
+	// Initialize lake directory
+	dataDir := getDataDir()
+	db.SetGlobalLakeDir(filepath.Join(dataDir, "lake"))
+
+	// Build query
+	query := db.ColumnarQuery{
+		Process: *processName,
+		TraceID: *traceID,
+		Level:   *level,
+		Source:  *source,
+		Limit:   *limit,
+	}
+
+	// Parse time filters
+	if *since != "" {
+		duration, err := time.ParseDuration(*since)
+		if err != nil {
+			fmt.Printf("Invalid duration format: %v\n", err)
+			os.Exit(1)
+		}
+		query.StartTime = time.Now().Add(-duration)
+		query.EndTime = time.Now()
+	}
+
+	if *startTime != "" {
+		t, err := time.Parse(time.RFC3339, *startTime)
+		if err != nil {
+			fmt.Printf("Invalid start time format: %v\n", err)
+			os.Exit(1)
+		}
+		query.StartTime = t
+	}
+
+	if *endTime != "" {
+		t, err := time.Parse(time.RFC3339, *endTime)
+		if err != nil {
+			fmt.Printf("Invalid end time format: %v\n", err)
+			os.Exit(1)
+		}
+		query.EndTime = t
+	}
+
+	// Determine which process to search
+	searchProcess := *processName
+	if searchProcess == "" {
+		// If no process specified, try to find the most recent one
+		// For now, we'll require a process name
+		fmt.Println("Error: --process flag is required")
+		fmt.Println("Use 'seyir sessions' to see available processes")
+		os.Exit(1)
+	}
+
+	// Perform search
+	fmt.Printf("Searching logs for process '%s'...\n", searchProcess)
+	results, err := db.SearchParquetWithDuckDB(searchProcess, query)
+	if err != nil {
+		fmt.Printf("Search failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Display results
+	if len(results) == 0 {
+		fmt.Println("No results found.")
+		return
+	}
+
+	fmt.Printf("\nFound %d results:\n", len(results))
+	fmt.Println(strings.Repeat("-", 120))
+
+	for _, entry := range results {
+		timestamp := entry.Ts.Format("2006-01-02 15:04:05")
+		traceInfo := ""
+		if entry.TraceID != "" {
+			traceInfo = fmt.Sprintf(" [trace:%s]", entry.TraceID)
+		}
+
+		fmt.Printf("[%s] [%s] %s%s\n", timestamp, entry.Level, entry.Message, traceInfo)
+		
+		// Show additional fields if present
+		if entry.Component != "" || entry.Thread != "" {
+			details := []string{}
+			if entry.Component != "" {
+				details = append(details, fmt.Sprintf("component=%s", entry.Component))
+			}
+			if entry.Thread != "" {
+				details = append(details, fmt.Sprintf("thread=%s", entry.Thread))
+			}
+			fmt.Printf("  └─ %s\n", strings.Join(details, ", "))
+		}
+	}
+
+	fmt.Println(strings.Repeat("-", 120))
+	fmt.Printf("Total: %d entries\n", len(results))
 }
