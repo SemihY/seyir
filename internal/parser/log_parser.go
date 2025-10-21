@@ -142,6 +142,20 @@ func (p *LogParser) AddDefaultPatterns() {
 		Pattern: regexp.MustCompile(`(?i)\[(TRACE|DEBUG|INFO|WARN(?:ING)?|ERROR|FATAL|PANIC)\]`),
 		LevelGroup: 1,
 	})
+	
+	// Pattern 7: Timestamp with brackets, level, service in parentheses, JSON message
+	// Example: [20:42:47.173] INFO (carbmee-api): {"trace_id":"...","context":"...","message":"..."}
+	p.patterns = append(p.patterns, LogPattern{
+		Name:    "Bracketed Time Level Service JSON",
+		Pattern: regexp.MustCompile(`^\[(\d{2}:\d{2}:\d{2}\.\d+)\]\s+(\w+)\s+\(([^)]+)\):\s+(.+)$`),
+		TimeFormat: "15:04:05.000",
+		TimeGroup: 1,
+		LevelGroup: 2,
+		MsgGroup: 4,
+		FieldGroups: map[string]int{
+			"service": 3,
+		},
+	})
 }
 
 // AddPattern registers a custom log pattern
@@ -197,8 +211,26 @@ func (p *LogParser) Parse(rawLine string) *ParsedLog {
 				result.Fields[k] = v
 			}
 			
-			// If JSON parsing was successful, return
-			if result.Level != LevelUnknown || !result.Timestamp.IsZero() {
+			// If JSON parsing was successful (has trace_id, component, or other identifiable fields)
+			if result.Level != LevelUnknown || !result.Timestamp.IsZero() || result.TraceID != "" || result.Component != "" || len(result.Fields) > 0 {
+				// Set defaults for missing fields
+				if result.Level == LevelUnknown {
+					result.Level = LevelInfo
+				}
+				if result.Timestamp.IsZero() {
+					result.Timestamp = time.Now()
+				}
+				if result.Message == "" || result.Message == rawLine {
+					// Try to create a meaningful message from fields
+					if entity, ok := result.Fields["entity"]; ok {
+						if operation, ok2 := result.Fields["operation"]; ok2 {
+							result.Message = fmt.Sprintf("%s %s", operation, entity)
+						}
+					}
+					if result.Message == "" || result.Message == rawLine {
+						result.Message = "JSON log entry"
+					}
+				}
 				return result
 			}
 		}
@@ -214,7 +246,14 @@ func (p *LogParser) Parse(rawLine string) *ParsedLog {
 		// Extract timestamp
 		if pattern.TimeGroup > 0 && pattern.TimeGroup < len(matches) {
 			if ts, err := time.Parse(pattern.TimeFormat, matches[pattern.TimeGroup]); err == nil {
-				result.Timestamp = ts
+				// If timestamp only has time (no date), use today's date
+				if pattern.TimeFormat == "15:04:05.000" || pattern.TimeFormat == "15:04:05" {
+					now := time.Now()
+					result.Timestamp = time.Date(now.Year(), now.Month(), now.Day(), 
+						ts.Hour(), ts.Minute(), ts.Second(), ts.Nanosecond(), ts.Location())
+				} else {
+					result.Timestamp = ts
+				}
 			}
 		}
 		
@@ -259,6 +298,39 @@ func (p *LogParser) Parse(rawLine string) *ParsedLog {
 	
 	// Extract key-value pairs from the message
 	extractKeyValuePairs(result)
+	
+	// If message looks like JSON, try to extract structured data from it
+	if strings.HasPrefix(strings.TrimSpace(result.Message), "{") {
+		if jsonParsed := tryParseJSON(result.Message); jsonParsed != nil {
+			// Merge JSON fields from message into result
+			if jsonParsed.TraceID != "" && result.TraceID == "" {
+				result.TraceID = jsonParsed.TraceID
+			}
+			if jsonParsed.RequestID != "" && result.RequestID == "" {
+				result.RequestID = jsonParsed.RequestID
+			}
+			if jsonParsed.UserID != "" && result.UserID == "" {
+				result.UserID = jsonParsed.UserID
+			}
+			if jsonParsed.Component != "" && result.Component == "" {
+				result.Component = jsonParsed.Component
+			}
+			// Merge all fields
+			for k, v := range jsonParsed.Fields {
+				if _, exists := result.Fields[k]; !exists {
+					result.Fields[k] = v
+				}
+			}
+			// Update message to be more readable
+			if jsonParsed.Message != "" && jsonParsed.Message != result.Message {
+				result.Message = jsonParsed.Message
+			} else if entity, ok := jsonParsed.Fields["entity"]; ok {
+				if operation, ok2 := jsonParsed.Fields["operation"]; ok2 {
+					result.Message = fmt.Sprintf("%s %s", operation, entity)
+				}
+			}
+		}
+	}
 	
 	// If no timestamp was parsed, use current time
 	if result.Timestamp.IsZero() {
@@ -387,7 +459,7 @@ func tryParseJSON(rawLine string) *ParsedLog {
 			}
 		case "service", "servicename", "svc":
 			result.Service = strValue
-		case "component", "comp", "logger":
+		case "component", "comp", "logger", "context":
 			result.Component = strValue
 		case "trace_id", "traceid", "trace":
 			result.TraceID = strValue
