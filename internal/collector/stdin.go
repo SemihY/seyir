@@ -8,12 +8,16 @@ import (
 	"os"
 	"os/signal"
 	"seyir/internal/db"
+	"seyir/internal/parser"
 	"syscall"
+
+	"github.com/google/uuid"
 )
 
 // StdinCollector collects logs from standard input
 type StdinCollector struct {
 	*BaseCollector
+	logParser *parser.LogParser
 }
 
 // NewStdinCollector creates a new stdin log collector
@@ -30,6 +34,7 @@ func NewStdinCollector(sourceName string) *StdinCollector {
 	
 	return &StdinCollector{
 		BaseCollector: baseCollector,
+		logParser:     parser.NewLogParser(),
 	}
 }
 
@@ -84,17 +89,26 @@ func (sc *StdinCollector) Start(ctx context.Context) error {
 				// Output the line to stdout (passthrough)
 				fmt.Println(line)
 				
-				// Parse structured data from the log line
-				parsedData := db.ParseLogLine(line)
+				// Parse the log line using the extensible parser
+				parsed := sc.logParser.Parse(line)
 				
-				// Create enhanced log entry from parsed data
-				var entry *db.LogEntry
-				if parsedData != nil {
-					entry = db.NewLogEntryFromParsed(sc.sourceName, parsedData)
-				} else {
-					// Fallback to simple parsing if structured parsing fails
-					level := sc.ParseLogLevel(line)
-					entry = db.NewLogEntry(sc.sourceName, level, line)
+				// Convert parser.LogLevel to db.Level
+				level := db.Level(parsed.Level)
+				
+				// Create log entry with parsed data
+				entry := &db.LogEntry{
+					ID:        uuid.New().String(),
+					Ts:        parsed.Timestamp,
+					Level:     level,
+					Message:   parsed.Message,
+					Source:    sc.sourceName,
+					Process:   sc.sourceName,
+					TraceID:   parsed.TraceID,
+					Component: parsed.Service, // Use service as component
+					Thread:    parsed.Thread,
+					UserID:    parsed.UserID,
+					RequestID: parsed.RequestID,
+					Tags:      []string{},
 				}
 				
 				sc.SaveAndBroadcast(entry)
