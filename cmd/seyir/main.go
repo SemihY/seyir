@@ -3,13 +3,13 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"seyir/internal/collector"
 	"seyir/internal/config"
 	"seyir/internal/db"
+	"seyir/internal/logger"
 	"seyir/internal/server"
 	"strconv"
 	"strings"
@@ -112,15 +112,15 @@ func main() {
 	// Load global configuration at startup (falls back to defaults)
 	configPath := config.GetDefaultConfigPath(dataDir)
 	if err := config.LoadConfig(configPath); err != nil {
-		log.Printf("[WARN] Failed to load configuration from %s: %v", configPath, err)
-		log.Printf("[INFO] Using default configuration")
+		logger.Warn("Failed to load configuration from %s: %v", configPath, err)
+		logger.Info("Using default configuration")
 	} else {
-		log.Printf("[INFO] Configuration loaded from %s", configPath)
+		logger.Info("Configuration loaded from %s", configPath)
 	}
 	
 	// Initialize batch configuration with loaded config
 	if err := db.LoadDefaultConfig(); err != nil {
-		log.Printf("[WARN] Failed to initialize batch configuration: %v", err)
+		logger.Warn("Failed to initialize batch configuration: %v", err)
 	}
 	
 	args := flag.Args()
@@ -187,7 +187,7 @@ func isPipeOperation() bool {
 
 // runPipeMode handles a single pipe operation - creates session DB and exits
 func runPipeMode() {
-	log.Printf("[INFO] Running in pipe mode - creating session DB")
+	logger.Info("Running in pipe mode - creating session DB")
 
 	collectorManager := collector.NewManager()
 
@@ -222,9 +222,9 @@ func runPipeMode() {
 	// Wait for either completion or signal
 	select {
 	case <-sigChan:
-		log.Printf("[INFO] Received signal, shutting down")
+		logger.Info("Received signal, shutting down")
 	case <-done:
-		log.Printf("[INFO] Stdin collection completed")
+		logger.Info("Stdin collection completed")
 	}
 
 	// Stop collectors and cleanup
@@ -233,7 +233,7 @@ func runPipeMode() {
 	// Cleanup ultra-light loggers
 	db.CleanupUltraLightLoggers()
 	
-	log.Printf("[INFO] Pipe operation completed")
+	logger.Info("Pipe operation completed")
 }
 
 // runShowSessions displays information about active sessions
@@ -285,9 +285,9 @@ func runWebServer(port string) {
 
 // runServiceMode starts both Docker collection and web server
 func runServiceMode(port string) {
-	log.Printf("[INFO] 🚀 Starting seyir service")
-	log.Printf("[INFO] 🌐 Web interface: http://localhost:%s", port)
-	log.Printf("[INFO] 🔍 Auto-discovering containers with 'seyir.enable=true' label")
+	logger.Info("🚀 Starting seyir service")
+	logger.Info("🌐 Web interface: http://localhost:%s", port)
+	logger.Info("🔍 Auto-discovering containers with 'seyir.enable=true' label")
 
 	// Create collector manager
 	collectorManager := collector.NewManager()
@@ -317,7 +317,7 @@ func runServiceMode(port string) {
 		serverErrChan <- srv.Start()
 	}()
 
-	log.Printf("[INFO] ✅ seyir service running. Press Ctrl+C to stop.")
+	logger.Info("✅ seyir service running. Press Ctrl+C to stop.")
 
 	// Handle signals for graceful shutdown
 	sigChan := make(chan os.Signal, 1)
@@ -329,7 +329,7 @@ func runServiceMode(port string) {
 		collectorManager.StopAll()
 		os.Exit(1)
 	case <-sigChan:
-		log.Printf("[INFO] 🛑 Shutting down seyir service...")
+		logger.Info("🛑 Shutting down seyir service...")
 		
 		// First stop collectors
 		collectorManager.StopAll()
@@ -337,7 +337,7 @@ func runServiceMode(port string) {
 		// Then cleanup ultra-light loggers to export any remaining data
 		db.CleanupUltraLightLoggers()
 		
-		log.Printf("[INFO] ✅ Graceful shutdown completed")
+		logger.Info("✅ Graceful shutdown completed")
 	}
 }
 

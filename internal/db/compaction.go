@@ -3,9 +3,9 @@ package db
 import (
 	"database/sql"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
+	"seyir/internal/logger"
 	"strings"
 	"sync"
 	"time"
@@ -115,7 +115,7 @@ func (cm *CompactionManager) Start() error {
 	}
 	
 	if !cm.config.Enabled {
-		log.Printf("[INFO] Compaction is disabled, skipping")
+		logger.Info("Compaction is disabled, skipping")
 		return nil
 	}
 	
@@ -124,7 +124,7 @@ func (cm *CompactionManager) Start() error {
 	
 	go cm.compactionWorker()
 	
-	log.Printf("[INFO] Compaction manager started (interval: %dh, min files: %d)", 
+	logger.Info("Compaction manager started (interval: %dh, min files: %d)", 
 		cm.config.IntervalHours, cm.config.MinFilesForCompaction)
 	
 	return nil
@@ -139,12 +139,12 @@ func (cm *CompactionManager) Stop() {
 		return
 	}
 	
-	log.Printf("[INFO] Stopping compaction manager...")
+	logger.Info("Stopping compaction manager...")
 	close(cm.stopChan)
 	cm.running = false
 	cm.wg.Wait()
 	
-	log.Printf("[INFO] Compaction manager stopped")
+	logger.Info("Compaction manager stopped")
 }
 
 // compactionWorker runs the background compaction loop
@@ -175,21 +175,21 @@ func (cm *CompactionManager) compactionWorker() {
 // runCompaction performs a full compaction cycle
 func (cm *CompactionManager) runCompaction() {
 	start := time.Now()
-	log.Printf("[INFO] Starting compaction cycle...")
+	logger.Info("Starting compaction cycle...")
 	
 	// Discover partitions that need compaction
 	partitions, err := cm.discoverPartitions()
 	if err != nil {
-		log.Printf("[ERROR] Failed to discover partitions for compaction: %v", err)
+		logger.Error("Failed to discover partitions for compaction: %v", err)
 		return
 	}
 	
 	if len(partitions) == 0 {
-		log.Printf("[INFO] No partitions need compaction")
+		logger.Info("No partitions need compaction")
 		return
 	}
 	
-	log.Printf("[INFO] Found %d partitions that need compaction", len(partitions))
+	logger.Info("Found %d partitions that need compaction", len(partitions))
 	
 	// Process partitions concurrently
 	semaphore := make(chan struct{}, cm.config.ConcurrentPartitions)
@@ -211,9 +211,9 @@ func (cm *CompactionManager) runCompaction() {
 			defer func() { <-semaphore }()
 			
 			if err := cm.compactPartition(&p); err != nil {
-				log.Printf("[ERROR] Failed to compact partition %s: %v", p.Path, err)
+				logger.Error("Failed to compact partition %s: %v", p.Path, err)
 			} else {
-				log.Printf("[INFO] Successfully compacted partition %s (%d files -> 1 file)", 
+				logger.Info("Successfully compacted partition %s (%d files -> 1 file)", 
 					p.Path, len(p.Files))
 				compactedCount++
 			}
@@ -223,7 +223,7 @@ func (cm *CompactionManager) runCompaction() {
 	wg.Wait()
 	
 	cm.lastCompaction = time.Now()
-	log.Printf("[INFO] Compaction cycle completed in %v (compacted %d partitions)", 
+	logger.Info("Compaction cycle completed in %v (compacted %d partitions)", 
 		time.Since(start), compactedCount)
 }
 
@@ -246,7 +246,7 @@ func (cm *CompactionManager) discoverPartitions() ([]*PartitionInfo, error) {
 		if strings.Contains(filepath.Base(path), "hour=") {
 			partition, err := cm.analyzePartition(path)
 			if err != nil {
-				log.Printf("[WARN] Failed to analyze partition %s: %v", path, err)
+				logger.Warn("Failed to analyze partition %s: %v", path, err)
 				return nil
 			}
 			
@@ -384,7 +384,7 @@ func (cm *CompactionManager) compactPartition(partition *PartitionInfo) error {
 	// Read all files and write to compacted file
 	unionPattern := strings.Join(filePatterns, ", ")
 	
-	log.Printf("[DEBUG] Compacting %d files in partition %s", len(filePatterns), partition.Path)
+	logger.Debug("Compacting %d files in partition %s", len(filePatterns), partition.Path)
 	
 	// Use DuckDB's efficient UNION ALL to combine files
 	sql := fmt.Sprintf(`
@@ -414,7 +414,7 @@ func (cm *CompactionManager) compactPartition(partition *PartitionInfo) error {
 		}
 		
 		if len(deleteErrors) > 0 {
-			log.Printf("[WARN] Some files could not be deleted after compaction: %v", deleteErrors)
+			logger.Warn("Some files could not be deleted after compaction: %v", deleteErrors)
 		}
 	}
 	
@@ -422,7 +422,7 @@ func (cm *CompactionManager) compactPartition(partition *PartitionInfo) error {
 	cm.totalCompactions++
 	cm.totalFilesMerged += int64(len(filesToDelete))
 	
-	log.Printf("[DEBUG] Compacted %d files into %s in %v", 
+	logger.Debug("Compacted %d files into %s in %v", 
 		len(filesToDelete), filepath.Base(compactedFile), time.Since(start))
 	
 	return nil
@@ -434,7 +434,7 @@ func (cm *CompactionManager) ForceCompaction() error {
 		return fmt.Errorf("compaction manager is not running")
 	}
 	
-	log.Printf("[INFO] Forcing compaction cycle...")
+	logger.Info("Forcing compaction cycle...")
 	go cm.runCompaction()
 	
 	return nil

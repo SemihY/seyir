@@ -3,10 +3,10 @@ package db
 import (
 	"database/sql"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"seyir/internal/config"
+	"seyir/internal/logger"
 	"strings"
 	"time"
 
@@ -16,7 +16,7 @@ import (
 // debugLog prints debug information only if query debug logging is enabled
 func debugLog(format string, args ...interface{}) {
 	if config.IsQueryDebugEnabled() {
-		log.Printf("[DEBUG] "+format, args...)
+		logger.Debug(format, args...)
 	}
 }
 
@@ -207,7 +207,7 @@ func FastQuery(filter *QueryFilter) (*QueryResult, error) {
 	// Get total count (without LIMIT) for pagination
 	totalCount, err := FastCount(filter)
 	if err != nil {
-		log.Printf("[WARN] Failed to get total count: %v", err)
+		logger.Warn("Failed to get total count: %v", err)
 		totalCount = int64(len(entries))
 	}
 	
@@ -602,7 +602,7 @@ func SearchParquetWithDuckDB(processName string, query ColumnarQuery) ([]*LogEnt
 		)
 		
 		if err != nil {
-			log.Printf("[WARN] Failed to scan row: %v", err)
+			logger.Warn("Failed to scan row: %v", err)
 			continue
 		}
 		
@@ -626,7 +626,7 @@ func SearchParquetWithDuckDB(processName string, query ColumnarQuery) ([]*LogEnt
 	}
 	
 	duration := time.Since(start)
-	log.Printf("[INFO] DuckDB search completed: %d results in %v", len(results), duration)
+	logger.Info("DuckDB search completed: %d results in %v", len(results), duration)
 	
 	return results, nil
 }

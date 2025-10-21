@@ -3,7 +3,7 @@ package db
 import (
 	"database/sql"
 	"fmt"
-	"log"
+	"seyir/internal/logger"
 	"sync"
 )
 
@@ -86,7 +86,7 @@ func (cp *ConnectionPool) preWarm() {
 	for i := 0; i < cp.maxSize/2; i++ {
 		conn, err := cp.createFunc()
 		if err != nil {
-			log.Printf("[WARN] Failed to pre-warm connection pool: %v", err)
+			logger.Warn("Failed to pre-warm connection pool: %v", err)
 			continue
 		}
 		
@@ -98,7 +98,7 @@ func (cp *ConnectionPool) preWarm() {
 		}
 	}
 	
-	log.Printf("[DEBUG] Connection pool pre-warmed with %d connections", len(cp.connections))
+	logger.Debug("Connection pool pre-warmed with %d connections", len(cp.connections))
 }
 
 // Get retrieves a connection from the pool
@@ -198,7 +198,7 @@ func (cp *ConnectionPool) Close() {
 		cp.closeFunc(conn)
 	}
 	
-	log.Printf("[INFO] Connection pool closed (total connections created: %d, peak: %d)", 
+	logger.Info("Connection pool closed (total connections created: %d, peak: %d)", 
 		cp.totalConnections, cp.peakConnections)
 }
 

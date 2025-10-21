@@ -4,9 +4,9 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"log"
 	"os/exec"
 	"seyir/internal/db"
+	"seyir/internal/logger"
 	"seyir/internal/parser"
 	"strings"
 	"sync"
@@ -134,7 +134,7 @@ func (dc *DockerCollector) discoverContainers(ctx context.Context) {
 	
 	out, err := exec.Command("docker", args...).Output()
 	if err != nil {
-		log.Printf("[ERROR] Docker discovery failed: %v", err)
+		logger.Error("Docker discovery failed: %v", err)
 		return
 	}
 
@@ -176,7 +176,7 @@ func (dc *DockerCollector) discoverContainers(ctx context.Context) {
 	}
 	
 	if newContainersCount > 0 {
-		log.Printf("[INFO] Started tracking %d new containers with seyir.enable=true", newContainersCount)
+		logger.Info("Started tracking %d new containers with seyir.enable=true", newContainersCount)
 	}
 	
 	// Stop collection for containers that are no longer running
@@ -185,7 +185,7 @@ func (dc *DockerCollector) discoverContainers(ctx context.Context) {
 		if !currentContainers[containerName] {
 			collector.Stop()
 			delete(dc.knownContainers, containerName)
-			log.Printf("[INFO] Stopped collecting logs from container: %s", containerName)
+			logger.Info("Stopped collecting logs from container: %s", containerName)
 		}
 	}
 	dc.mutex.Unlock()
@@ -204,7 +204,7 @@ func (dc *DockerCollector) startContainerCollection(ctx context.Context, contain
 	
 	collector := NewContainerLogCollector(sourceName)
 	if collector == nil {
-		log.Printf("[ERROR] Failed to create container collector for %s", containerName)
+		logger.Error("Failed to create container collector for %s", containerName)
 		return
 	}
 	
@@ -220,7 +220,7 @@ func (dc *DockerCollector) startContainerCollection(ctx context.Context, contain
 	
 	go func() {
 		if err := collector.Start(ctx); err != nil {
-			log.Printf("[ERROR] Failed to start log collection for %s: %v", containerName, err)
+			logger.Error("Failed to start log collection for %s: %v", containerName, err)
 			
 			// Remove failed container from known list
 			dc.mutex.Lock()
@@ -229,7 +229,7 @@ func (dc *DockerCollector) startContainerCollection(ctx context.Context, contain
 		}
 	}()
 	
-	log.Printf("[INFO] Started collecting logs from container: %s (project: %s, component: %s)", 
+	logger.Info("Started collecting logs from container: %s (project: %s, component: %s)", 
 		containerName, containerProject, component)
 }
 
@@ -269,7 +269,7 @@ func (clc *ContainerLogCollector) Start(ctx context.Context) error {
 		for retries < maxRetries {
 			if err := clc.collectLogs(ctx); err != nil {
 				retries++
-				log.Printf("[WARN] Container %s log collection failed (attempt %d/%d): %v", 
+				logger.Warn("Container %s log collection failed (attempt %d/%d): %v", 
 					clc.containerName, retries, maxRetries, err)
 				
 				if retries < maxRetries {
@@ -277,7 +277,7 @@ func (clc *ContainerLogCollector) Start(ctx context.Context) error {
 					continue
 				}
 				
-				log.Printf("[ERROR] Failed to collect logs from %s after %d attempts", 
+				logger.Error("Failed to collect logs from %s after %d attempts", 
 					clc.containerName, maxRetries)
 				return
 			}
@@ -414,7 +414,7 @@ func (clc *ContainerLogCollector) IsHealthy() bool {
 func StartDockerDiscovery() {
 	collector := NewDockerCollector()
 	if collector == nil {
-		log.Printf("[ERROR] Failed to create Docker collector")
+		logger.Error("Failed to create Docker collector")
 		return
 	}
 	ctx := context.Background()
@@ -424,7 +424,7 @@ func StartDockerDiscovery() {
 func CaptureDockerLogs(containerName string) {
 	collector := NewContainerLogCollector(containerName)
 	if collector == nil {
-		log.Printf("[ERROR] Failed to create container collector for %s", containerName)
+		logger.Error("Failed to create container collector for %s", containerName)
 		return
 	}
 	ctx := context.Background()

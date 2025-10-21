@@ -2,9 +2,9 @@ package db
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
+	"seyir/internal/logger"
 	"sync"
 	"time"
 
@@ -137,7 +137,7 @@ func (ps *ParquetStreamer) StreamToParquet(entries []*LogEntry, processName stri
 	}
 
 	duration := time.Since(start)
-	log.Printf("[INFO] Streamed %d entries to %s in %v (%.2f KB)", 
+	logger.Info("Streamed %d entries to %s in %v (%.2f KB)", 
 		len(entries), fileName, duration, float64(fileSize)/1024)
 
 	return filePath, fileSize, nil
@@ -196,7 +196,7 @@ func (ps *ParquetStreamer) StreamToParquetFast(entries []*LogEntry, processName 
 		fileSize = fileInfo.Size()
 	}
 
-	log.Printf("[ULTRA-FAST] Streamed %d entries to %s (%.2f KB)", len(entries), fileName, float64(fileSize)/1024)
+	logger.Debug("[ULTRA-FAST] Streamed %d entries to %s (%.2f KB)", len(entries), fileName, float64(fileSize)/1024)
 
 	return filePath, fileSize, nil
 }

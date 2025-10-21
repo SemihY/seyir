@@ -1,7 +1,7 @@
 package db
 
 import (
-	"log"
+	"seyir/internal/logger"
 	"sync"
 	"time"
 )
@@ -65,14 +65,14 @@ func CleanupInactiveSessions(maxInactiveTime time.Duration) int {
 	
 	for id, session := range activeSessions {
 		if now.Sub(session.LastActivity) > maxInactiveTime {
-			log.Printf("[INFO] Cleaning up inactive session: %s (inactive for %v)", id, now.Sub(session.LastActivity))
+			logger.Info("Cleaning up inactive session: %s (inactive for %v)", id, now.Sub(session.LastActivity))
 			delete(activeSessions, id)
 			cleaned++
 		}
 	}
 	
 	if cleaned > 0 {
-		log.Printf("[INFO] Cleaned up %d inactive sessions. Active sessions: %d", cleaned, len(activeSessions))
+		logger.Info("Cleaned up %d inactive sessions. Active sessions: %d", cleaned, len(activeSessions))
 	}
 	
 	return cleaned

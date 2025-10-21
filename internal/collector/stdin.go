@@ -5,11 +5,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
 	"seyir/internal/config"
 	"seyir/internal/db"
+	"seyir/internal/logger"
 	"seyir/internal/parser"
 	"sync"
 	"syscall"
@@ -93,16 +93,16 @@ func (sc *StdinCollector) Start(ctx context.Context) error {
 			case <-sc.StopChan():
 				return
 			case sig := <-sigCh:
-				log.Printf("Stdin collector received signal %v, shutting down gracefully", sig)
+				logger.Debug("Stdin collector received signal %v, shutting down gracefully", sig)
 				return
 			default:
 				if !scanner.Scan() {
 					// Check if we hit EOF or an error
 					if err := scanner.Err(); err != nil {
-						log.Printf("Error reading stdin: %v", err)
+						logger.Error("Error reading stdin: %v", err)
 					}
 					// EOF reached - pipe is closed
-					log.Printf("EOF reached on stdin, finishing collection")
+					logger.Debug("EOF reached on stdin, finishing collection")
 					return
 				}
 				
@@ -218,7 +218,7 @@ func (sc *StdinCollector) cleanupOldHashes() {
 func CaptureStdin(source string) {
 	collector := NewStdinCollector(source)
 	if collector == nil {
-		log.Printf("[ERROR] Failed to create stdin collector for %s", source)
+		logger.Error("Failed to create stdin collector for %s", source)
 		return
 	}
 	ctx := context.Background()

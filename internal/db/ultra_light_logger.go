@@ -2,7 +2,7 @@ package db
 
 import (
 	"fmt"
-	"log"
+	"seyir/internal/logger"
 	"sync"
 	"time"
 )
@@ -68,7 +68,7 @@ func (ull *UltraLightLogger) Start() error {
 		mode = "Ultra-Fast"
 	}
 
-	log.Printf("[INFO] UltraLightLogger started for process %s (mode: %s, buffer: %d, export: %v)",
+	logger.Info("UltraLightLogger started for process %s (mode: %s, buffer: %d, export: %v)",
 		ull.processName, mode, ull.ringBuffer.MaxSize(), ull.exportInterval)
 
 	return nil
@@ -98,10 +98,10 @@ func (ull *UltraLightLogger) Stop() error {
 
 	// Final export
 	if err := ull.ExportToParquet(); err != nil {
-		log.Printf("[ERROR] Final export failed: %v", err)
+		logger.Error("Final export failed: %v", err)
 	}
 
-	log.Printf("[INFO] UltraLightLogger stopped for process %s (total entries: %d, exports: %d)",
+	logger.Info("UltraLightLogger stopped for process %s (total entries: %d, exports: %d)",
 		ull.processName, ull.totalEntries, ull.totalExports)
 
 	return nil
@@ -116,7 +116,7 @@ func (ull *UltraLightLogger) AddEntry(entry *LogEntry) error {
 	if ull.ringBuffer.IsFull() && ull.autoExport {
 		go func() {
 			if err := ull.ExportToParquet(); err != nil {
-				log.Printf("[ERROR] Auto-export failed: %v", err)
+				logger.Error("Auto-export failed: %v", err)
 				ull.exportErrors++
 			}
 		}()
@@ -133,7 +133,7 @@ func (ull *UltraLightLogger) backgroundExport() {
 		select {
 		case <-ull.exportTicker.C:
 			if err := ull.ExportToParquet(); err != nil {
-				log.Printf("[ERROR] Background export failed: %v", err)
+				logger.Error("Background export failed: %v", err)
 				ull.exportErrors++
 			}
 		case <-ull.stopChan:
@@ -175,7 +175,7 @@ func (ull *UltraLightLogger) ExportToParquet() error {
 	duration := time.Since(start)
 	entriesPerMs := float64(len(entries)) / float64(duration.Milliseconds())
 
-	log.Printf("[INFO] Exported %d entries in %v (%.2f entries/ms, size: %.2f KB)",
+	logger.Info("Exported %d entries in %v (%.2f entries/ms, size: %.2f KB)",
 		len(entries), duration, entriesPerMs, float64(fileSize)/1024)
 
 	return nil

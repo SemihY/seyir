@@ -3,9 +3,9 @@ package db
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
+	"seyir/internal/logger"
 	"sync"
 	"time"
 )
@@ -98,8 +98,10 @@ func (rm *RetentionManager) start() {
 		defer rm.wg.Done()
 		defer rm.ticker.Stop()
 		
-		log.Printf("[INFO] Retention manager started (retention: %d days, interval: %v)", 
-			rm.config.RetentionDays, rm.config.CleanupInterval)
+		if rm.config.Enabled {
+			logger.Info("Retention manager started (retention: %d days, interval: %v)", 
+				rm.config.RetentionDays, rm.config.CleanupInterval)
+		}
 		
 		// Run initial cleanup after a short delay
 		time.Sleep(30 * time.Second)
@@ -110,7 +112,7 @@ func (rm *RetentionManager) start() {
 			case <-rm.ticker.C:
 				rm.performCleanup()
 			case <-rm.ctx.Done():
-				log.Printf("[INFO] Retention manager shutting down")
+				logger.Info("Retention manager shutting down")
 				return
 			}
 		}
@@ -123,11 +125,11 @@ func (rm *RetentionManager) performCleanup() {
 	
 	lakeDir := GetGlobalLakeDir()
 	if lakeDir == "" {
-		log.Printf("[WARN] No lake directory set, skipping retention cleanup")
+		logger.Warn("No lake directory set, skipping retention cleanup")
 		return
 	}
 	
-	log.Printf("[INFO] Starting retention cleanup (retention: %d days)", rm.config.RetentionDays)
+	logger.Info("Starting retention cleanup (retention: %d days)", rm.config.RetentionDays)
 	
 	stats := &RetentionStats{
 		LastCleanup: start,
@@ -137,7 +139,7 @@ func (rm *RetentionManager) performCleanup() {
 	// Get all process directories
 	processDirs, err := rm.getProcessDirectories(lakeDir)
 	if err != nil {
-		log.Printf("[ERROR] Failed to get process directories: %v", err)
+		logger.Error("Failed to get process directories: %v", err)
 		return
 	}
 	
@@ -161,10 +163,10 @@ func (rm *RetentionManager) performCleanup() {
 	duration := time.Since(start)
 	
 	if stats.TotalFilesDeleted > 0 {
-		log.Printf("[INFO] Retention cleanup completed in %v: deleted %d files (%.2f MB) from %d process directories",
+		logger.Info("Retention cleanup completed in %v: deleted %d files (%.2f MB) from %d process directories",
 			duration, stats.TotalFilesDeleted, float64(stats.TotalBytesDeleted)/(1024*1024), stats.ProcessDirs)
 	} else {
-		log.Printf("[DEBUG] Retention cleanup completed in %v: no files to delete", duration)
+		logger.Debug("Retention cleanup completed in %v: no files to delete", duration)
 	}
 }
 
@@ -193,7 +195,7 @@ func (rm *RetentionManager) cleanupProcessDirectory(processDir string) *Retentio
 	pattern := filepath.Join(processDir, "*.parquet")
 	files, err := filepath.Glob(pattern)
 	if err != nil {
-		log.Printf("[ERROR] Failed to glob files in %s: %v", processDir, err)
+		logger.Error("Failed to glob files in %s: %v", processDir, err)
 		return stats
 	}
 	
@@ -290,13 +292,13 @@ func (rm *RetentionManager) cleanupProcessDirectory(processDir string) *Retentio
 	// Delete files
 	for _, fi := range filesToDelete {
 		if rm.config.DryRun {
-			log.Printf("[DRY-RUN] Would delete: %s (%.2f MB, %s old)",
+			logger.Info("[DRY-RUN] Would delete: %s (%.2f MB, %s old)",
 				filepath.Base(fi.path), float64(fi.size)/(1024*1024), time.Since(fi.modTime).Truncate(time.Hour))
 		} else {
 			if err := os.Remove(fi.path); err != nil {
-				log.Printf("[ERROR] Failed to delete %s: %v", fi.path, err)
+				logger.Error("Failed to delete %s: %v", fi.path, err)
 			} else {
-				log.Printf("[DEBUG] Deleted: %s (%.2f MB, %s old)",
+				logger.Debug("Deleted: %s (%.2f MB, %s old)",
 					filepath.Base(fi.path), float64(fi.size)/(1024*1024), time.Since(fi.modTime).Truncate(time.Hour))
 				stats.TotalFilesDeleted++
 				stats.TotalBytesDeleted += fi.size
@@ -325,7 +327,7 @@ func (rm *RetentionManager) UpdateConfig(config *RetentionConfig) {
 		rm.ticker.Reset(config.CleanupInterval)
 	}
 	
-	log.Printf("[INFO] Retention configuration updated: enabled=%t, days=%d, interval=%v",
+	logger.Info("Retention configuration updated: enabled=%t, days=%d, interval=%v",
 		config.Enabled, config.RetentionDays, config.CleanupInterval)
 }
 
@@ -360,11 +362,11 @@ func (rm *RetentionManager) GetStats() RetentionStats {
 // RunCleanupNow forces an immediate cleanup operation
 func (rm *RetentionManager) RunCleanupNow() {
 	if !rm.config.Enabled {
-		log.Printf("[WARN] Retention is disabled, cannot run cleanup")
+		logger.Warn("Retention is disabled, cannot run cleanup")
 		return
 	}
 	
-	log.Printf("[INFO] Running manual retention cleanup")
+	logger.Info("Running manual retention cleanup")
 	rm.performCleanup()
 }
 
@@ -378,13 +380,13 @@ func (rm *RetentionManager) stop() {
 
 // Shutdown gracefully shuts down the retention manager
 func (rm *RetentionManager) Shutdown() {
-	log.Printf("[INFO] Shutting down retention manager...")
+	logger.Info("Shutting down retention manager...")
 	
 	rm.cancel()
 	rm.stop()
 	rm.wg.Wait()
 	
-	log.Printf("[INFO] Retention manager shutdown complete")
+	logger.Info("Retention manager shutdown complete")
 }
 
 // ForceCleanupOlderThan immediately deletes files older than the specified duration
@@ -394,7 +396,7 @@ func (rm *RetentionManager) ForceCleanupOlderThan(duration time.Duration) (int64
 		return 0, 0, fmt.Errorf("no lake directory set")
 	}
 	
-	log.Printf("[INFO] Force cleanup: deleting files older than %v", duration)
+	logger.Info("Force cleanup: deleting files older than %v", duration)
 	
 	cutoffTime := time.Now().Add(-duration)
 	var totalFiles, totalBytes int64
@@ -419,17 +421,17 @@ func (rm *RetentionManager) ForceCleanupOlderThan(duration time.Duration) (int64
 			
 			if stat.ModTime().Before(cutoffTime) {
 				if err := os.Remove(file); err != nil {
-					log.Printf("[ERROR] Failed to delete %s: %v", file, err)
+					logger.Error("Failed to delete %s: %v", file, err)
 				} else {
 					totalFiles++
 					totalBytes += stat.Size()
-					log.Printf("[DEBUG] Force deleted: %s", filepath.Base(file))
+					logger.Debug("Force deleted: %s", filepath.Base(file))
 				}
 			}
 		}
 	}
 	
-	log.Printf("[INFO] Force cleanup completed: deleted %d files (%.2f MB)", 
+	logger.Info("Force cleanup completed: deleted %d files (%.2f MB)", 
 		totalFiles, float64(totalBytes)/(1024*1024))
 	
 	return totalFiles, totalBytes, nil

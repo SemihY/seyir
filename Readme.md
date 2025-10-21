@@ -90,7 +90,7 @@ seyir query distinct --column=source
 
 ## Configuration
 
-Located at `~/.seyir/config.json` or `config/config.json`:
+Located at `~/.seyir/config/config.json` or `config/config.json`:
 
 ```json
 {
@@ -102,6 +102,12 @@ Located at `~/.seyir/config.json` or `config/config.json`:
   "retention": {
     "enabled": true,
     "retention_days": 30
+  },
+  "debug": {
+    "enable_query_debug": false,
+    "enable_batch_debug": false,
+    "enable_server_debug": false,
+    "enable_db_debug": false
   }
 }
 ```
@@ -112,6 +118,13 @@ Update config:
 seyir batch config set buffer_size 5000
 seyir batch config set export_interval 60
 seyir batch retention enable
+```
+
+Enable debug logging (shows INFO/DEBUG messages):
+
+```bash
+# Edit config file and set any debug flag to true
+# Then restart seyir
 ```
 
 ## Docker Deployment

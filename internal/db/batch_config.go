@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"seyir/internal/logger"
 	"time"
 )
 
@@ -219,14 +220,14 @@ func InitializeBatchConfigFromFile(configPath string) error {
 	retentionManager := GetRetentionManager()
 	retentionManager.UpdateConfig(retentionConfig)
 	
-	fmt.Printf("[INFO] Configuration loaded from %s\n", configPath)
-	fmt.Printf("[INFO] UltraLight: enabled=%t, buffer=%d, interval=%ds, memory=%dMB, ultra_fast=%t\n", 
+	logger.Info("Configuration loaded from %s", configPath)
+	logger.Info("UltraLight: enabled=%t, buffer=%d, interval=%ds, memory=%dMB, ultra_fast=%t", 
 		config.UltraLight.Enabled, config.UltraLight.BufferSize,
 		config.UltraLight.ExportIntervalSeconds, config.UltraLight.MaxMemoryMB, config.UltraLight.UseUltraFastMode)
-	fmt.Printf("[INFO] Compaction: enabled=%t, interval=%dh, min_files=%d, max_size=%dMB\n",
+	logger.Info("Compaction: enabled=%t, interval=%dh, min_files=%d, max_size=%dMB",
 		config.Compaction.Enabled, config.Compaction.IntervalHours, 
 		config.Compaction.MinFilesForCompaction, config.Compaction.MaxCompactedSizeMB)
-	fmt.Printf("[INFO] Retention: enabled=%t, days=%d, cleanup_hours=%d, keep_min=%d\n",
+	logger.Info("Retention: enabled=%t, days=%d, cleanup_hours=%d, keep_min=%d",
 		config.Retention.Enabled, config.Retention.RetentionDays, 
 		config.Retention.CleanupHours, config.Retention.KeepMinFiles)
 	

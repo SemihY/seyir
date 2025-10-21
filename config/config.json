@@ -21,6 +21,13 @@
   },
   "server": {
     "port": "5555",
-    "enable_cors": true
+    "enable_cors": true,
+    "enable_debug": false
+  },
+  "debug": {
+    "enable_query_debug": false,
+    "enable_batch_debug": false,
+    "enable_server_debug": false,
+    "enable_db_debug": false
   }
 }

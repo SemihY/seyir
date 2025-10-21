@@ -2,8 +2,8 @@ package collector
 
 import (
 	"context"
-	"log"
 	"seyir/internal/db"
+	"seyir/internal/logger"
 	"seyir/internal/tail"
 )
 
@@ -48,14 +48,14 @@ func (bc *BaseCollector) SaveAndBroadcast(entry *db.LogEntry) {
 	}
 	
 	manager := db.GetUltraLightLoggerManager()
-	logger, err := manager.GetOrCreateLogger(processName)
+	ulLogger, err := manager.GetOrCreateLogger(processName)
 	if err != nil {
-		log.Printf("[ERROR] Failed to get/create UltraLight logger: %v", err)
+		logger.Error("Failed to get/create UltraLight logger: %v", err)
 		return
 	}
 	
-	if err := logger.AddEntry(entry); err != nil {
-		log.Printf("[ERROR] UltraLight logger failed to add entry: %v", err)
+	if err := ulLogger.AddEntry(entry); err != nil {
+		logger.Error("UltraLight logger failed to add entry: %v", err)
 		return
 	}
 	

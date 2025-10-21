@@ -3,7 +3,7 @@ package collector
 import (
 	"context"
 	"fmt"
-	"log"
+	"seyir/internal/logger"
 	"sync"
 )
 
@@ -33,7 +33,7 @@ func (m *Manager) AddCollector(name string, collector LogSource) error {
 	defer m.mutex.Unlock()
 	
 	if _, exists := m.collectors[name]; exists {
-		log.Printf("[WARN] Collector %s already exists, replacing it", name)
+		logger.Warn("Collector %s already exists, replacing it", name)
 		m.collectors[name].Stop()
 	}
 	
@@ -42,12 +42,12 @@ func (m *Manager) AddCollector(name string, collector LogSource) error {
 	// Start the collector
 	go func() {
 		if err := collector.Start(m.ctx); err != nil {
-			log.Printf("[ERROR] Failed to start collector %s: %v", name, err)
+			logger.Error("Failed to start collector %s: %v", name, err)
 			m.removeCollector(name)
 		}
 	}()
 	
-	log.Printf("[INFO] Added and started collector: %s", name)
+	logger.Info("Added and started collector: %s", name)
 	return nil
 }
 
@@ -63,13 +63,13 @@ func (m *Manager) RemoveCollector(name string) error {
 func (m *Manager) removeCollector(name string) error {
 	if collector, exists := m.collectors[name]; exists {
 		if err := collector.Stop(); err != nil {
-			log.Printf("[ERROR] Error stopping collector %s: %v", name, err)
+			logger.Error("Error stopping collector %s: %v", name, err)
 		}
 		if err := collector.Close(); err != nil {
-			log.Printf("[ERROR] Error closing collector %s: %v", name, err)
+			logger.Error("Error closing collector %s: %v", name, err)
 		}
 		delete(m.collectors, name)
-		log.Printf("[INFO] Removed collector: %s", name)
+		logger.Info("Removed collector: %s", name)
 	}
 	return nil
 }
@@ -89,7 +89,7 @@ func (m *Manager) StartAll() error {
 	for i, collector := range collectors {
 		go func(name string, coll LogSource) {
 			if err := coll.Start(m.ctx); err != nil {
-				log.Printf("[ERROR] Failed to start collector %s: %v", name, err)
+				logger.Error("Failed to start collector %s: %v", name, err)
 			}
 		}(names[i], collector)
 	}
@@ -107,15 +107,15 @@ func (m *Manager) StopAll() error {
 	
 	for name, collector := range m.collectors {
 		if err := collector.Stop(); err != nil {
-			log.Printf("[ERROR] Error stopping collector %s: %v", name, err)
+			logger.Error("Error stopping collector %s: %v", name, err)
 		}
 		if err := collector.Close(); err != nil {
-			log.Printf("[ERROR] Error closing collector %s: %v", name, err)
+			logger.Error("Error closing collector %s: %v", name, err)
 		}
 	}
 	
 	m.collectors = make(map[string]LogSource)
-	log.Printf("[INFO] Stopped all collectors")
+	logger.Info("Stopped all collectors")
 	return nil
 }
 
