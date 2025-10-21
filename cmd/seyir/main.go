@@ -288,7 +288,6 @@ func runServiceMode(port string) {
 	log.Printf("[INFO] 🚀 Starting seyir service")
 	log.Printf("[INFO] 🌐 Web interface: http://localhost:%s", port)
 	log.Printf("[INFO] 🔍 Auto-discovering containers with 'seyir.enable=true' label")
-	log.Printf("[DEBUG] Received port parameter: %s", port)
 
 	// Create collector manager
 	collectorManager := collector.NewManager()

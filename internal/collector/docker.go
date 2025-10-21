@@ -7,9 +7,12 @@ import (
 	"log"
 	"os/exec"
 	"seyir/internal/db"
+	"seyir/internal/parser"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 const (
@@ -334,47 +337,49 @@ func (clc *ContainerLogCollector) scanLogs(reader interface{ Read([]byte) (int, 
 		case <-clc.StopChan():
 			return
 		default:
-			line := strings.TrimSpace(scanner.Text())
-			if line == "" {
-				continue
-			}
-			
-			// Parse structured data from the log line
-			parsedData := db.ParseLogLine(line)
-			
-			// Create source name with stream type if it's stderr
-			sourceName := clc.containerName
-			if streamType == "stderr" {
-				sourceName = fmt.Sprintf("%s[stderr]", clc.containerName)
-			}
-			
-			// Create enhanced log entry from parsed data
-			var entry *db.LogEntry
-			if parsedData != nil {
-				entry = db.NewLogEntryFromParsed(sourceName, parsedData)
-				// Add container metadata if not already set
-				if entry.Process == "" {
-					entry.Process = clc.containerName
-				}
-				if entry.Component == "" && clc.component != "" {
-					entry.Component = clc.component
-				}
-			} else {
-				// Fallback to simple parsing if structured parsing fails
-				level := clc.ParseLogLevel(line)
-				entry = db.NewLogEntry(sourceName, level, line)
-				entry.Process = clc.containerName // Set container as process
-				if clc.component != "" {
-					entry.Component = clc.component
-				}
-			}
-			
-			// Always set project from container metadata if available
-			if clc.project != "" {
-				entry.Source = clc.project // Use project as high-level source grouping
-			}
-			
-			clc.SaveAndBroadcast(entry)
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		
+		// Parse log line using the extensible parser
+		p := parser.NewLogParser()
+		parsed := p.Parse(line)
+		
+		// Create source name with stream type if it's stderr
+		sourceName := clc.containerName
+		if streamType == "stderr" {
+			sourceName = fmt.Sprintf("%s[stderr]", clc.containerName)
+		}
+		
+		// Convert parser.LogLevel to db.Level
+		level := db.Level(parsed.Level)
+		
+		// Create log entry with parsed data
+		entry := &db.LogEntry{
+			ID:        uuid.New().String(),
+			Ts:        parsed.Timestamp,
+			Level:     level,
+			Message:   parsed.Message,
+			Source:    sourceName,
+			Process:   clc.containerName,
+			TraceID:   parsed.TraceID,
+			Component: parsed.Service,
+			Thread:    parsed.Thread,
+			UserID:    parsed.UserID,
+			RequestID: parsed.RequestID,
+			Tags:      []string{},
+		}
+		
+		// Override with container metadata if available
+		if clc.component != "" {
+			entry.Component = clc.component
+		}
+		if clc.project != "" {
+			entry.Source = clc.project // Use project as high-level source grouping
+		}
+		
+		clc.SaveAndBroadcast(entry)
 		}
 	}
 }

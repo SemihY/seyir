@@ -14,6 +14,7 @@ type GlobalConfig struct {
 	FileRotation  FileRotationConfig  `json:"file_rotation"`
 	Retention     RetentionConfig     `json:"retention"`
 	ProcessDirs   ProcessDirsConfig   `json:"process_dirs"`
+	Collector     CollectorConfig     `json:"collector"`
 	Server        ServerConfig        `json:"server"`
 	Debug         DebugConfig         `json:"debug"`
 }
@@ -45,6 +46,10 @@ type RetentionConfig struct {
 type ProcessDirsConfig struct {
 	UseProcessName bool   `json:"use_process_name"`
 	BasePath       string `json:"base_path"`
+}
+
+type CollectorConfig struct {
+	MaxLineSizeBytes int `json:"max_line_size_bytes"` // Maximum log line size (default 1MB)
 }
 
 type ServerConfig struct {
@@ -93,6 +98,9 @@ func DefaultConfig() *GlobalConfig {
 		ProcessDirs: ProcessDirsConfig{
 			UseProcessName: true,
 			BasePath:       "logs",
+		},
+		Collector: CollectorConfig{
+			MaxLineSizeBytes: 1024 * 1024, // 1MB default
 		},
 		Server: ServerConfig{
 			Port:        "5555",
@@ -195,6 +203,11 @@ func GetRetention() RetentionConfig {
 // GetProcessDirs returns process directories configuration
 func GetProcessDirs() ProcessDirsConfig {
 	return Get().ProcessDirs
+}
+
+// GetCollector returns collector configuration
+func GetCollector() CollectorConfig {
+	return Get().Collector
 }
 
 // GetServer returns server configuration

@@ -1,6 +1,8 @@
 package parser
 
 import (
+	"encoding/json"
+	"fmt"
 	"regexp"
 	"strings"
 	"time"
@@ -149,11 +151,57 @@ func (p *LogParser) AddPattern(pattern LogPattern) {
 
 // Parse attempts to parse a raw log line using registered patterns
 func (p *LogParser) Parse(rawLine string) *ParsedLog {
+	// Strip ANSI color codes first
+	rawLine = stripANSIColors(rawLine)
+	
 	result := &ParsedLog{
 		RawLine: rawLine,
 		Level:   LevelUnknown,
 		Message: rawLine, // Default to full line
 		Fields:  make(map[string]string),
+	}
+	
+	// First, try to parse as JSON
+	if strings.HasPrefix(strings.TrimSpace(rawLine), "{") {
+		if parsed := tryParseJSON(rawLine); parsed != nil {
+			// Merge JSON parsed data into result
+			if parsed.Level != LevelUnknown {
+				result.Level = parsed.Level
+			}
+			if !parsed.Timestamp.IsZero() {
+				result.Timestamp = parsed.Timestamp
+			}
+			if parsed.Message != "" {
+				result.Message = parsed.Message
+			}
+			if parsed.Service != "" {
+				result.Service = parsed.Service
+			}
+			if parsed.Component != "" {
+				result.Component = parsed.Component
+			}
+			if parsed.TraceID != "" {
+				result.TraceID = parsed.TraceID
+			}
+			if parsed.RequestID != "" {
+				result.RequestID = parsed.RequestID
+			}
+			if parsed.UserID != "" {
+				result.UserID = parsed.UserID
+			}
+			if parsed.Thread != "" {
+				result.Thread = parsed.Thread
+			}
+			// Merge fields
+			for k, v := range parsed.Fields {
+				result.Fields[k] = v
+			}
+			
+			// If JSON parsing was successful, return
+			if result.Level != LevelUnknown || !result.Timestamp.IsZero() {
+				return result
+			}
+		}
 	}
 	
 	// Try each pattern in order
@@ -295,4 +343,97 @@ func (p *LogParser) GetSupportedFormats() []string {
 		formats[i] = pattern.Name
 	}
 	return formats
+}
+
+// tryParseJSON attempts to parse a JSON-formatted log line
+func tryParseJSON(rawLine string) *ParsedLog {
+	var jsonData map[string]interface{}
+	if err := json.Unmarshal([]byte(rawLine), &jsonData); err != nil {
+		return nil
+	}
+	
+	result := &ParsedLog{
+		RawLine: rawLine,
+		Level:   LevelUnknown,
+		Fields:  make(map[string]string),
+	}
+	
+	// Extract common JSON log fields
+	for key, value := range jsonData {
+		keyLower := strings.ToLower(key)
+		
+		// Convert value to string
+		var strValue string
+		switch v := value.(type) {
+		case string:
+			strValue = v
+		case float64, int, int64:
+			strValue = fmt.Sprintf("%v", v)
+		case bool:
+			strValue = fmt.Sprintf("%v", v)
+		default:
+			continue
+		}
+		
+		// Map to known fields
+		switch keyLower {
+		case "level", "severity", "loglevel":
+			result.Level = normalizeLogLevel(strValue)
+		case "message", "msg", "text":
+			result.Message = strValue
+		case "timestamp", "time", "ts", "@timestamp":
+			if t, err := parseJSONTimestamp(strValue); err == nil {
+				result.Timestamp = t
+			}
+		case "service", "servicename", "svc":
+			result.Service = strValue
+		case "component", "comp", "logger":
+			result.Component = strValue
+		case "trace_id", "traceid", "trace":
+			result.TraceID = strValue
+		case "request_id", "requestid", "req_id":
+			result.RequestID = strValue
+		case "user_id", "userid", "user":
+			result.UserID = strValue
+		case "thread", "threadid", "tid":
+			result.Thread = strValue
+		default:
+			// Store all other fields
+			result.Fields[key] = strValue
+		}
+	}
+	
+	// If no message was found, use the entire JSON as message
+	if result.Message == "" {
+		result.Message = rawLine
+	}
+	
+	return result
+}
+
+// parseJSONTimestamp attempts to parse various timestamp formats
+func parseJSONTimestamp(ts string) (time.Time, error) {
+	formats := []string{
+		time.RFC3339,
+		time.RFC3339Nano,
+		"2006-01-02T15:04:05.999Z07:00",
+		"2006-01-02 15:04:05",
+		"2006-01-02T15:04:05",
+	}
+	
+	for _, format := range formats {
+		if t, err := time.Parse(format, ts); err == nil {
+			return t, nil
+		}
+	}
+	
+	return time.Time{}, fmt.Errorf("unable to parse timestamp: %s", ts)
+}
+
+// stripANSIColors removes ANSI color codes from log lines
+func stripANSIColors(s string) string {
+	// ANSI escape sequences: ESC [ ... m
+	// Pattern matches: \x1b[...m or \033[...m
+	ansiPattern := regexp.MustCompile(`\x1b\[[0-9;]*m`)
+	return ansiPattern.ReplaceAllString(s, "")
 }

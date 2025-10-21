@@ -55,40 +55,6 @@ func GetActiveSessions() map[string]SessionInfo {
 	return result
 }
 
-// RegisterSession registers a new session
-func RegisterSession(sessionID, processInfo string) {
-	sessionsMutex.Lock()
-	defer sessionsMutex.Unlock()
-	
-	activeSessions[sessionID] = &SessionInfo{
-		SessionID:    sessionID,
-		CreatedAt:    time.Now(),
-		LastActivity: time.Now(),
-		ProcessInfo:  processInfo,
-	}
-	
-	log.Printf("[INFO] Session %s registered. Active sessions: %d", sessionID, len(activeSessions))
-}
-
-// UpdateSessionActivity updates the last activity time for a session
-func UpdateSessionActivity(sessionID string) {
-	sessionsMutex.Lock()
-	defer sessionsMutex.Unlock()
-	
-	if session, exists := activeSessions[sessionID]; exists {
-		session.LastActivity = time.Now()
-	}
-}
-
-// UnregisterSession removes a session from tracking
-func UnregisterSession(sessionID string) {
-	sessionsMutex.Lock()
-	defer sessionsMutex.Unlock()
-	
-	delete(activeSessions, sessionID)
-	log.Printf("[INFO] Session %s unregistered. Active sessions: %d", sessionID, len(activeSessions))
-}
-
 // CleanupInactiveSessions removes sessions that haven't been active for a specified duration
 func CleanupInactiveSessions(maxInactiveTime time.Duration) int {
 	sessionsMutex.Lock()

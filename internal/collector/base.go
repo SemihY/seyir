@@ -62,30 +62,6 @@ func (bc *BaseCollector) SaveAndBroadcast(entry *db.LogEntry) {
 	tail.BroadcastLog(entry)
 }
 
-// ParseLogLevel attempts to detect the log level from the message
-func (bc *BaseCollector) ParseLogLevel(message string) db.Level {
-	msg := message // Simple conversion for now
-	_ = msg
-	
-	// Check for common log level patterns
-	for _, pattern := range []string{"[ERROR]", "ERROR:", "error:", "FATAL", "fatal"} {
-		if contains(message, pattern) {
-			return db.ERROR
-		}
-	}
-	for _, pattern := range []string{"[WARN]", "WARN:", "warn:", "WARNING", "warning"} {
-		if contains(message, pattern) {
-			return db.WARN
-		}
-	}
-	for _, pattern := range []string{"[DEBUG]", "DEBUG:", "debug:", "TRACE", "trace"} {
-		if contains(message, pattern) {
-			return db.DEBUG
-		}
-	}
-	return db.INFO
-}
-
 // IsRunning returns true if the collector is currently running
 func (bc *BaseCollector) IsRunning() bool {
 	return bc.isRunning
@@ -105,20 +81,4 @@ func (bc *BaseCollector) StopChan() <-chan struct{} {
 func (bc *BaseCollector) RequestStop() {
 	close(bc.stopChan)
 	bc.isRunning = false
-}
-
-// contains checks if text contains pattern (case-sensitive for performance)
-func contains(text, pattern string) bool {
-	return len(text) >= len(pattern) && 
-		(text[:len(pattern)] == pattern || 
-		 len(text) > len(pattern) && findInString(text, pattern))
-}
-
-func findInString(text, pattern string) bool {
-	for i := 0; i <= len(text)-len(pattern); i++ {
-		if text[i:i+len(pattern)] == pattern {
-			return true
-		}
-	}
-	return false
 }

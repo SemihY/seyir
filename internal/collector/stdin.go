@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"seyir/internal/config"
 	"seyir/internal/db"
 	"seyir/internal/parser"
 	"syscall"
@@ -61,6 +62,14 @@ func (sc *StdinCollector) Start(ctx context.Context) error {
 		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM, syscall.SIGPIPE)
 		
 		scanner := bufio.NewScanner(os.Stdin)
+		// Get max line size from config (default 1MB)
+		maxScanTokenSize := config.GetCollector().MaxLineSizeBytes
+		if maxScanTokenSize <= 0 {
+			maxScanTokenSize = 1024 * 1024 // 1MB fallback
+		}
+		buf := make([]byte, maxScanTokenSize)
+		scanner.Buffer(buf, maxScanTokenSize)
+		
 		for {
 			select {
 			case <-ctx.Done():

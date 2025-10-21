@@ -104,8 +104,18 @@ func (cf *BatchConfigFile) ToRetentionConfig() *RetentionConfig {
 func LoadConfigFromFile(configPath string) (*BatchConfigFile, error) {
 	// Check if file exists
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		// Create default config file if it doesn't exist
+		// File doesn't exist. Prepare default config.
 		defaultConfig := DefaultConfigFile()
+
+		// If process is started with piped stdin (pipe mode), avoid creating files
+		if stat, sErr := os.Stdin.Stat(); sErr == nil {
+			if (stat.Mode() & os.ModeCharDevice) == 0 {
+				// Running in pipe mode - return defaults without persisting to disk
+				return defaultConfig, nil
+			}
+		}
+
+		// Otherwise, attempt to create default config file on disk
 		if err := SaveConfigToFile(configPath, defaultConfig); err != nil {
 			return nil, fmt.Errorf("failed to create default config file: %v", err)
 		}
@@ -260,11 +270,19 @@ func LoadDefaultConfig() error {
 	retentionManager := GetRetentionManager()
 	retentionManager.UpdateConfig(retentionConfig)
 	
+	// If process is started with piped stdin (pipe mode), avoid creating files
+	if stat, sErr := os.Stdin.Stat(); sErr == nil {
+		if (stat.Mode() & os.ModeCharDevice) == 0 {
+			// Running in pipe mode - do not create config file on disk
+			return nil
+		}
+	}
+
 	// Try to create default config file
 	if err := SaveConfigToFile(DefaultConfigPath, config); err == nil {
 		fmt.Printf("[INFO] Created default configuration file at %s\n", DefaultConfigPath)
 	}
-	
+
 	fmt.Printf("[INFO] Using default UltraLight configuration\n")
 	return nil
 }
