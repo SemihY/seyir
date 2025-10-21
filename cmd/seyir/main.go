@@ -908,7 +908,7 @@ func runQueryStats() {
 
 // runSearchUsage shows search command usage
 func runSearchUsage() {
-	fmt.Println(`Usage: seyir search [flags]
+	fmt.Print(`Usage: seyir search [flags]
 
 Flags:
   --process <name>      Filter by process name
