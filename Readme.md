@@ -1,137 +1,164 @@
-# 🪶 seyir
+# Seyir
 
-> Lightweight, zero-dependency log viewer that collects and searches local or container logs from multiple sources in real time
+Centralized log collector and viewer with Docker container auto-discovery.
 
----
+## Features
 
-## 🚀 Features
+- **Auto-discovery**: Monitors Docker containers with `seyir.enable=true` label
+- **Pipe logs**: Stream logs from any source via stdin
+- **Fast search**: DuckDB-powered queries on compressed Parquet storage
+- **Web UI**: Real-time log viewing at `http://localhost:5555`
+- **Structured parsing**: JSON, key-value pairs, timestamps
+- **Compaction**: Automatic merging of small files
+- **Retention**: Configurable log retention policies
 
-* **🧩 Zero dependencies:** Uses only DuckDB — no external services or databases.
-* **🔍 Instant search:** Simple HTML/JS interface to view and filter logs.
-* **📦 Multiple operating modes:**
-  * **Pipe Mode:** Stream logs directly from any terminal command (`| seyir`).
-  * **Container Mode (beta):** Automatically discovers and collects logs from containers.
-* **🗂 Retention:** Background cleaner automatically purges old logs.
-* **💾 DuckDB backend:** Fast analytical queries with minimal resource usage.
-* **🖥 macOS Menubar UI:** Quick access to logs from the system tray.
-* **🧱 Modular & Extensible:** Add your own collectors for new log sources.
-* **⚙️ CLI-first:** Install, run, and configure entirely from the terminal.
+## Quick Start
 
----
-
-## 🧑‍💻 Installation
-
-### 🍺 Homebrew
+### Install
 
 ```bash
-brew install seyir
+# User install
+make install-user
+
+# System-wide install
+make install
 ```
 
-or
-
-### 🌐 Curl installer
+### Run Service
 
 ```bash
-curl -fsSL https://get.seyir.sh | bash
+# Start with Docker auto-discovery + web UI
+seyir service
+
+# Web UI only
+seyir web --port 8080
 ```
 
----
+### Label Containers
 
-### 2️⃣ Container Mode (Beta)
+```bash
+# Basic tracking
+docker run -l seyir.enable=true my-app
 
-Run seyir in your Coolify or Docker environment to automatically collect logs from other containers:
+# With metadata
+docker run -l seyir.enable=true -l seyir.project=web -l seyir.component=api backend-service
+```
+
+### Pipe Logs
+
+```bash
+# From Docker
+docker logs mycontainer | seyir
+
+# From Kubernetes
+kubectl logs -f deployment/api | seyir
+
+# From file
+tail -f app.log | seyir
+```
+
+## Commands
+
+```bash
+seyir service              # Start collector + web UI
+seyir web                  # Web UI only
+seyir search <query>       # Search logs
+seyir sessions             # List active sessions
+seyir cleanup              # Remove old sessions
+seyir batch stats          # Show buffer statistics
+seyir batch config         # Manage configuration
+```
+
+## Search Examples
+
+```bash
+# Simple search
+seyir --search "error" search
+
+# With filters
+seyir query filter --levels=ERROR,WARN --limit=100
+
+# By trace ID
+seyir query filter --trace-ids=abc123
+
+# Time range
+seyir query filter --start='2025-01-01 00:00:00' --end='2025-01-02 00:00:00'
+
+# Distinct values
+seyir query distinct --column=source
+```
+
+## Configuration
+
+Located at `~/.seyir/config.json` or `config/config.json`:
+
+```json
+{
+  "ultra_light": {
+    "enabled": true,
+    "buffer_size": 10000,
+    "export_interval_seconds": 30
+  },
+  "retention": {
+    "enabled": true,
+    "retention_days": 30
+  }
+}
+```
+
+Update config:
+
+```bash
+seyir batch config set buffer_size 5000
+seyir batch config set export_interval 60
+seyir batch retention enable
+```
+
+## Docker Deployment
 
 ```bash
 docker run -d \
-  --name seyir \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  -v ~/.seyir:/data \
-  -p 7777:7777 \
-  -e ENABLE_DOCKER_CAPTURE=true \
-  ghcr.io/seyir/seyir:latest
+  -v seyir-data:/app/data \
+  -p 5555:5555 \
+  seyir:latest
 ```
 
-## 🧰 Development
-
-### Build locally
+Or with compose:
 
 ```bash
+make docker-run
+```
+
+## Development
+
+```bash
+# Build
 make build
+
+# Run locally
+make run
+
+# Test pipe mode
+make demo
+
+# Dependencies
+make deps
 ```
 
-### Run locally
+## Data Storage
 
-```bash
-./bin/seyir
-```
+Logs are stored in `~/.seyir/lake/` as compressed Parquet files, organized by session and timestamp.
 
-### Test with multiple pipes
+## Architecture
 
-```bash
-# Terminal 1
-echo "App1: Starting service" | ./bin/seyir
+- **Collectors**: Docker auto-discovery, stdin pipe
+- **Parser**: Structured log parsing (JSON, key-value)
+- **Storage**: DuckDB + Parquet (columnar compression)
+- **Web Server**: Real-time log streaming and search
+- **Compaction**: Automatic file merging
+- **Retention**: Time-based cleanup
 
-# Terminal 2  
-echo "App2: Database connected" | ./bin/seyir
+## License
 
-# Terminal 3
-echo "App3: Error occurred" | ./bin/seyir
-
-# All logs appear in the same dashboard at http://localhost:7777
-```
-
-### Package with GoReleaser
-
-```bash
-goreleaser release --snapshot --clean
-```
-
----
-
-## 🧼 Configuration
-
-| Env Variable             | Description                      | Default                    |
-| ------------------------ | -------------------------------- | -------------------------- |
-| `seyir_PORT`           | HTTP port for the web UI         | `7777`                     |
-| `seyir_DB_PATH`        | Path to the DuckDB database file | `~/.seyir/logs.duckdb`   |
-| `seyir_RETENTION_DAYS` | Retention period for logs        | `7`                        |
-| `ENABLE_DOCKER_CAPTURE`  | Enable container auto-discovery  | `false`                    |
-| `DISABLE_AUTO_OPEN`      | Disable auto-opening browser     | `false`                    |
-
----
-
-## 🧪 Example Usage
-
-### Basic Logging
-```bash
-# Single application
-docker logs my-service -f | seyir
-
-# Multiple applications (each creates own DuckDB instance)
-kubectl logs -f deployment/api | seyir &
-kubectl logs -f deployment/worker | seyir &
-kubectl logs -f deployment/scheduler | seyir &
-```
-
-### Querying the Lake
-Visit: 👉 [http://localhost:7777](http://localhost:7777)
-
-- **Live Search**: Type to filter logs across all sources instantly
-- **Source Filtering**: Filter by application/container name  
-- **Level Filtering**: Show only ERROR, WARN, INFO, or DEBUG logs
-- **Time Range**: Search within specific time periods
-- **Federated View**: See logs from all connected sources in one interface
-
-## 🛣️ Roadmap
-
-- [ ] **Query API**: REST endpoints for programmatic access
-- [ ] **Log Correlation**: Trace ID tracking across services  
-- [ ] **Alerting**: Real-time notifications on error patterns
-- [ ] **Dashboards**: Custom analytics views and metrics
-- [ ] **Export**: Export logs to external systems
-
----
-
-## 🧱 License
-
-MIT © seyir Contributors
+MIT
