@@ -115,7 +115,7 @@ Seyir runs perfectly as a self-hosted app on [Coolify](https://coolify.io/):
 ## 🤝 Contributing
 
 Contributions and feedback are welcome!
-Open an issue or PR at [github.com/semihyildiz/seyir](https://github.com/semihyildiz/seyir)
+Open an issue or PR at [github.com/SemihY/seyir](https://github.com/semihy/seyir)
 
 ---
 
