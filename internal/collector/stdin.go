@@ -79,7 +79,8 @@ func (sc *StdinCollector) Start(ctx context.Context) error {
 		
 		scanner := bufio.NewScanner(os.Stdin)
 		// Get max line size from config (default 1MB)
-		maxScanTokenSize := config.GetCollector().MaxLineSizeBytes
+		cfg := config.Get()
+		maxScanTokenSize := cfg.Collector.MaxLineSizeBytes
 		if maxScanTokenSize <= 0 {
 			maxScanTokenSize = 1024 * 1024 // 1MB fallback
 		}

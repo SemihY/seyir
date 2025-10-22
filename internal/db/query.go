@@ -15,7 +15,7 @@ import (
 
 // debugLog prints debug information only if query debug logging is enabled
 func debugLog(format string, args ...interface{}) {
-	if config.IsQueryDebugEnabled() {
+	if config.IsDebugEnabled() {
 		logger.Debug(format, args...)
 	}
 }

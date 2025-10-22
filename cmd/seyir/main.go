@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -110,17 +111,12 @@ func main() {
 	db.SetGlobalLakeDir(lakeDir)
 	
 	// Load global configuration at startup (falls back to defaults)
-	configPath := config.GetDefaultConfigPath(dataDir)
-	if err := config.LoadConfig(configPath); err != nil {
+	configPath := config.GetPath(dataDir)
+	if err := config.Load(configPath); err != nil {
 		logger.Warn("Failed to load configuration from %s: %v", configPath, err)
 		logger.Info("Using default configuration")
 	} else {
 		logger.Info("Configuration loaded from %s", configPath)
-	}
-	
-	// Initialize batch configuration with loaded config
-	if err := db.LoadDefaultConfig(); err != nil {
-		logger.Warn("Failed to initialize batch configuration: %v", err)
 	}
 	
 	args := flag.Args()
@@ -349,7 +345,7 @@ Usage:
     seyir batch <command> [options]
 
 Commands:
-    config [get|set] [key] [value]    Manage batch configuration
+    config [get|set] [key] [value]    Manage configuration
     stats                             Show batch buffer statistics  
     flush                             Force flush all batch buffers
     retention [enable|disable|clean]  Manage log retention
@@ -359,8 +355,8 @@ Examples:
     # Show current configuration
     seyir batch config get
 
-    # Set flush interval to 3 seconds
-    seyir batch config set export_interval 60
+    # Set flush interval to 30 seconds
+    seyir batch config set flush_interval 30
 
     # Set buffer size to 5000
     seyir batch config set buffer_size 5000
@@ -423,93 +419,45 @@ func runBatchConfig(args []string) {
 }
 
 func runBatchConfigGet() {
-	// Try to load configuration from default location
-	config, err := db.LoadConfigFromFile(db.DefaultConfigPath)
-	if err != nil {
-		fmt.Printf("Error loading config: %v\n", err)
-		return
-	}
+	cfg := config.Get()
 
-	fmt.Println("Current UltraLight Configuration:")
-	fmt.Printf("  Enabled: %t\n", config.UltraLight.Enabled)
-	fmt.Printf("  Buffer Size: %d entries\n", config.UltraLight.BufferSize)
-	fmt.Printf("  Export Interval: %d seconds\n", config.UltraLight.ExportIntervalSeconds)
-	fmt.Printf("  Max Memory: %d MB\n", config.UltraLight.MaxMemoryMB)
-	fmt.Printf("  Ultra Fast Mode: %t\n", config.UltraLight.UseUltraFastMode)
+	fmt.Println("Current Configuration:")
+	fmt.Printf("  Buffer Size: %d entries\n", cfg.Buffer.Size)
+	fmt.Printf("  Flush Interval: %d seconds\n", cfg.Buffer.FlushIntervalSeconds)
+	fmt.Printf("  Max Memory: %d MB\n", cfg.Buffer.MaxMemoryMB)
+	fmt.Printf("  Worker Count: %d\n", cfg.Buffer.WorkerCount)
 	
-	fmt.Println("\nCompaction Configuration:")
-	fmt.Printf("  Enabled: %t\n", config.Compaction.Enabled)
-	fmt.Printf("  Interval: %d hours\n", config.Compaction.IntervalHours)
-	fmt.Printf("  Min Files: %d\n", config.Compaction.MinFilesForCompaction)
-	fmt.Printf("  Max Size: %d MB\n", config.Compaction.MaxCompactedSizeMB)
+	fmt.Println("\nFile Settings:")
+	fmt.Printf("  Max File Size: %d MB\n", cfg.Files.MaxSizeMB)
+	fmt.Printf("  Max Files: %d\n", cfg.Files.MaxFiles)
+	fmt.Printf("  Compression: %s\n", cfg.Files.Compression)
 	
-	fmt.Println("\nRetention Configuration:")
-	fmt.Printf("  Enabled: %t\n", config.Retention.Enabled)
-	fmt.Printf("  Retention Days: %d\n", config.Retention.RetentionDays)
-	fmt.Printf("  Cleanup Hours: %d\n", config.Retention.CleanupHours)
-	fmt.Printf("  Keep Min Files: %d\n", config.Retention.KeepMinFiles)
+	fmt.Println("\nRetention:")
+	fmt.Printf("  Enabled: %t\n", cfg.Retention.Enabled)
+	fmt.Printf("  Days: %d\n", cfg.Retention.Days)
+	fmt.Printf("  Cleanup Hours: %d\n", cfg.Retention.CleanupHours)
+	fmt.Printf("  Keep Min Files: %d\n", cfg.Retention.KeepMinFiles)
+	fmt.Printf("  Max Total Size: %.1f GB\n", cfg.Retention.MaxTotalSizeGB)
+	
+	fmt.Println("\nServer:")
+	fmt.Printf("  Port: %s\n", cfg.Server.Port)
+	fmt.Printf("  CORS Enabled: %t\n", cfg.Server.EnableCORS)
+	
+	fmt.Println("\nDebug:")
+	fmt.Printf("  Enabled: %t\n", cfg.Debug.Enabled)
 }
 
 func runBatchConfigSet(key, value string) {
-	// Load current config
-	config, err := db.LoadConfigFromFile(db.DefaultConfigPath)
-	if err != nil {
-		fmt.Printf("Error loading config: %v\n", err)
+	// Set configuration value
+	if err := config.Set(key, value); err != nil {
+		fmt.Printf("Error setting config: %v\n", err)
 		return
 	}
 
-	// Update the specified key
-	switch key {
-	case "buffer_size":
-		if val, err := strconv.Atoi(value); err == nil && val >= 100 {
-			config.UltraLight.BufferSize = val
-		} else {
-			fmt.Printf("Invalid buffer_size value: %s (must be >= 100)\n", value)
-			return
-		}
-	case "export_interval":
-		if val, err := strconv.Atoi(value); err == nil && val >= 1 {
-			config.UltraLight.ExportIntervalSeconds = val
-		} else {
-			fmt.Printf("Invalid export_interval value: %s (must be >= 1)\n", value)
-			return
-		}
-	case "max_memory_mb":
-		if val, err := strconv.Atoi(value); err == nil && val >= 1 {
-			config.UltraLight.MaxMemoryMB = val
-		} else {
-			fmt.Printf("Invalid max_memory_mb value: %s (must be >= 1)\n", value)
-			return
-		}
-	case "ultra_fast_mode":
-		if val, err := strconv.ParseBool(value); err == nil {
-			config.UltraLight.UseUltraFastMode = val
-		} else {
-			fmt.Printf("Invalid ultra_fast_mode value: %s (must be true or false)\n", value)
-			return
-		}
-	case "compaction_interval":
-		if val, err := strconv.Atoi(value); err == nil && val >= 1 {
-			config.Compaction.IntervalHours = val
-		} else {
-			fmt.Printf("Invalid compaction_interval value: %s (must be >= 1)\n", value)
-			return
-		}
-	case "retention_days":
-		if val, err := strconv.Atoi(value); err == nil && val >= 1 {
-			config.Retention.RetentionDays = val
-		} else {
-			fmt.Printf("Invalid retention_days value: %s (must be >= 1)\n", value)
-			return
-		}
-	default:
-		fmt.Printf("Unknown configuration key: %s\n", key)
-		fmt.Println("Available keys: buffer_size, export_interval, max_memory_mb, ultra_fast_mode, compaction_interval, retention_days")
-		return
-	}
-
-	// Save updated config
-	if err := db.SaveConfigToFile(db.DefaultConfigPath, config); err != nil {
+	// Save configuration
+	dataDir := getDataDir()
+	configPath := config.GetPath(dataDir)
+	if err := config.Save(configPath); err != nil {
 		fmt.Printf("Error saving config: %v\n", err)
 		return
 	}
@@ -570,15 +518,18 @@ func runBatchRetention(args []string) {
 }
 
 func runBatchExample() {
-	example := db.GetConfigExample()
+	example := config.Default()
+	data, _ := json.MarshalIndent(example, "", "  ")
 	
-	fmt.Println("Example Batch Configuration (config/config.json):")
-	fmt.Println(example)
+	fmt.Println("Example Configuration (config.json):")
+	fmt.Println(string(data))
 	
 	fmt.Printf("\nTo use this configuration:\n")
-	fmt.Printf("1. Save the above JSON to: %s\n", db.DefaultConfigPath)
+	dataDir := getDataDir()
+	configPath := config.GetPath(dataDir)
+	fmt.Printf("1. Save the above JSON to: %s\n", configPath)
 	fmt.Printf("2. Restart seyir\n")
-	fmt.Printf("3. Or use the HTTP API: POST /api/batch/config\n")
+	fmt.Printf("3. Or use: seyir batch config set <key> <value>\n")
 }
 
 // Query command functions

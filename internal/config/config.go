@@ -8,135 +8,142 @@ import (
 	"sync"
 )
 
-// GlobalConfig holds all application configuration
-type GlobalConfig struct {
-	BatchBuffer   BatchBufferConfig   `json:"batch_buffer"`
-	FileRotation  FileRotationConfig  `json:"file_rotation"`
-	Retention     RetentionConfig     `json:"retention"`
-	ProcessDirs   ProcessDirsConfig   `json:"process_dirs"`
-	Collector     CollectorConfig     `json:"collector"`
-	Server        ServerConfig        `json:"server"`
-	Debug         DebugConfig         `json:"debug"`
-}
+// Config holds all application configuration
+type Config struct {
+	// Log collection settings
+	Buffer struct {
+		Size                 int  `json:"size"`                    // Buffer size (default: 10000)
+		FlushIntervalSeconds int  `json:"flush_interval_seconds"`  // Flush interval (default: 30)
+		MaxMemoryMB          int  `json:"max_memory_mb"`           // Max memory usage (default: 100)
+		WorkerCount          int  `json:"worker_count"`            // Worker threads (default: 3)
+	} `json:"buffer"`
 
-type BatchBufferConfig struct {
-	FlushIntervalSeconds int  `json:"flush_interval_seconds"`
-	BatchSize            int  `json:"batch_size"`
-	MaxMemoryMB          int  `json:"max_memory_mb"`
-	EnableAsync          bool `json:"enable_async"`
-	WorkerCount          int  `json:"worker_count"`
-}
+	// File management
+	Files struct {
+		MaxSizeMB   int    `json:"max_size_mb"`   // Max file size (default: 50)
+		MaxFiles    int    `json:"max_files"`     // Max files per session (default: 100)
+		Compression string `json:"compression"`   // Compression type (default: "zstd")
+	} `json:"files"`
 
-type FileRotationConfig struct {
-	MaxFileSizeMB int    `json:"max_file_size_mb"`
-	MaxFiles      int    `json:"max_files"`
-	Compression   string `json:"compression"`
-}
+	// Data retention
+	Retention struct {
+		Enabled        bool    `json:"enabled"`         // Enable retention (default: true)
+		Days           int     `json:"days"`            // Keep logs for X days (default: 30)
+		CleanupHours   int     `json:"cleanup_hours"`   // Cleanup interval (default: 24)
+		KeepMinFiles   int     `json:"keep_min_files"`  // Always keep minimum files (default: 10)
+		MaxTotalSizeGB float64 `json:"max_total_size_gb"` // Max total size (default: 10.0)
+	} `json:"retention"`
 
-type RetentionConfig struct {
-	Enabled           bool    `json:"enabled"`
-	RetentionDays     int     `json:"retention_days"`
-	CleanupHours      int     `json:"cleanup_hours"`
-	MaxFilesPerScan   int     `json:"max_files_per_scan"`
-	DryRun            bool    `json:"dry_run"`
-	KeepMinFiles      int     `json:"keep_min_files"`
-	MaxTotalSizeGB    float64 `json:"max_total_size_gb"`
-}
+	// Server settings
+	Server struct {
+		Port       string `json:"port"`        // Server port (default: "5555")
+		EnableCORS bool   `json:"enable_cors"` // Enable CORS (default: true)
+	} `json:"server"`
 
-type ProcessDirsConfig struct {
-	UseProcessName bool   `json:"use_process_name"`
-	BasePath       string `json:"base_path"`
-}
+	// Collector settings
+	Collector struct {
+		MaxLineSizeBytes int `json:"max_line_size_bytes"` // Max log line size (default: 1MB)
+	} `json:"collector"`
 
-type CollectorConfig struct {
-	MaxLineSizeBytes int `json:"max_line_size_bytes"` // Maximum log line size (default 1MB)
-}
-
-type ServerConfig struct {
-	Port        string `json:"port"`
-	EnableCORS  bool   `json:"enable_cors"`
-	EnableDebug bool   `json:"enable_debug"`
-}
-
-type DebugConfig struct {
-	EnableQueryDebug  bool `json:"enable_query_debug"`
-	EnableBatchDebug  bool `json:"enable_batch_debug"`
-	EnableServerDebug bool `json:"enable_server_debug"`
-	EnableDBDebug     bool `json:"enable_db_debug"`
+	// Debug settings
+	Debug struct {
+		Enabled bool `json:"enabled"` // Enable debug logging (default: false)
+	} `json:"debug"`
 }
 
 var (
-	globalConfig *GlobalConfig
+	globalConfig *Config
 	configMutex  sync.RWMutex
 	configLoaded bool
 )
 
-// DefaultConfig returns the default configuration
-func DefaultConfig() *GlobalConfig {
-	return &GlobalConfig{
-		BatchBuffer: BatchBufferConfig{
-			FlushIntervalSeconds: 5,
-			BatchSize:            10000,
+// Default returns the default configuration
+func Default() *Config {
+	return &Config{
+		Buffer: struct {
+			Size                 int `json:"size"`
+			FlushIntervalSeconds int `json:"flush_interval_seconds"`
+			MaxMemoryMB          int `json:"max_memory_mb"`
+			WorkerCount          int `json:"worker_count"`
+		}{
+			Size:                 10000,
+			FlushIntervalSeconds: 30,
 			MaxMemoryMB:          100,
-			EnableAsync:          true,
 			WorkerCount:          3,
 		},
-		FileRotation: FileRotationConfig{
-			MaxFileSizeMB: 50,
-			MaxFiles:      50,
-			Compression:   "zstd",
+		Files: struct {
+			MaxSizeMB   int    `json:"max_size_mb"`
+			MaxFiles    int    `json:"max_files"`
+			Compression string `json:"compression"`
+		}{
+			MaxSizeMB:   50,
+			MaxFiles:    100,
+			Compression: "zstd",
 		},
-		Retention: RetentionConfig{
-			Enabled:           true,
-			RetentionDays:     30,
-			CleanupHours:      1,
-			MaxFilesPerScan:   1000,
-			DryRun:            false,
-			KeepMinFiles:      100,
-			MaxTotalSizeGB:    10.0,
+		Retention: struct {
+			Enabled        bool    `json:"enabled"`
+			Days           int     `json:"days"`
+			CleanupHours   int     `json:"cleanup_hours"`
+			KeepMinFiles   int     `json:"keep_min_files"`
+			MaxTotalSizeGB float64 `json:"max_total_size_gb"`
+		}{
+			Enabled:        true,
+			Days:           30,
+			CleanupHours:   24,
+			KeepMinFiles:   10,
+			MaxTotalSizeGB: 10.0,
 		},
-		ProcessDirs: ProcessDirsConfig{
-			UseProcessName: true,
-			BasePath:       "logs",
+		Server: struct {
+			Port       string `json:"port"`
+			EnableCORS bool   `json:"enable_cors"`
+		}{
+			Port:       "5555",
+			EnableCORS: true,
 		},
-		Collector: CollectorConfig{
-			MaxLineSizeBytes: 1024 * 1024, // 1MB default
+		Collector: struct {
+			MaxLineSizeBytes int `json:"max_line_size_bytes"`
+		}{
+			MaxLineSizeBytes: 1024 * 1024, // 1MB
 		},
-		Server: ServerConfig{
-			Port:        "5555",
-			EnableCORS:  true,
-			EnableDebug: false,
-		},
-		Debug: DebugConfig{
-			EnableQueryDebug:  false,
-			EnableBatchDebug:  false,
-			EnableServerDebug: false,
-			EnableDBDebug:     false,
+		Debug: struct {
+			Enabled bool `json:"enabled"`
+		}{
+			Enabled: false,
 		},
 	}
 }
 
-// LoadConfig loads configuration from file with fallback to defaults
-func LoadConfig(configPath string) error {
+// Load loads configuration from file or uses defaults
+func Load(configPath string) error {
 	configMutex.Lock()
 	defer configMutex.Unlock()
 
 	// Start with defaults
-	globalConfig = DefaultConfig()
+	globalConfig = Default()
 
-	// Try to load from file
+	// If config file doesn't exist, create it with defaults
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		// Config file doesn't exist, use defaults
+		// Don't create file in pipe mode
+		if isPipeMode() {
+			configLoaded = true
+			return nil
+		}
+
+		// Create default config file
+		if err := save(configPath, globalConfig); err != nil {
+			return fmt.Errorf("failed to create default config: %v", err)
+		}
 		configLoaded = true
 		return nil
 	}
 
+	// Load existing config file
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return fmt.Errorf("failed to read config file: %v", err)
 	}
 
-	// Merge with defaults (overwrites only specified fields)
+	// Parse and merge with defaults
 	if err := json.Unmarshal(data, globalConfig); err != nil {
 		return fmt.Errorf("failed to parse config file: %v", err)
 	}
@@ -145,8 +152,8 @@ func LoadConfig(configPath string) error {
 	return nil
 }
 
-// SaveConfig saves the current configuration to file
-func SaveConfig(configPath string) error {
+// Save saves configuration to file
+func Save(configPath string) error {
 	configMutex.RLock()
 	defer configMutex.RUnlock()
 
@@ -154,12 +161,17 @@ func SaveConfig(configPath string) error {
 		return fmt.Errorf("no configuration loaded")
 	}
 
+	return save(configPath, globalConfig)
+}
+
+// save is the internal save function (not thread-safe)
+func save(configPath string, config *Config) error {
 	// Ensure directory exists
 	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
 		return fmt.Errorf("failed to create config directory: %v", err)
 	}
 
-	data, err := json.MarshalIndent(globalConfig, "", "  ")
+	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %v", err)
 	}
@@ -172,12 +184,12 @@ func SaveConfig(configPath string) error {
 }
 
 // Get returns a copy of the current configuration
-func Get() *GlobalConfig {
+func Get() *Config {
 	configMutex.RLock()
 	defer configMutex.RUnlock()
 
 	if !configLoaded || globalConfig == nil {
-		return DefaultConfig()
+		return Default()
 	}
 
 	// Return a copy to prevent external modifications
@@ -185,96 +197,88 @@ func Get() *GlobalConfig {
 	return &copy
 }
 
-// GetBatchBuffer returns batch buffer configuration
-func GetBatchBuffer() BatchBufferConfig {
-	return Get().BatchBuffer
+// Set updates a configuration value
+func Set(key, value string) error {
+	configMutex.Lock()
+	defer configMutex.Unlock()
+
+	if globalConfig == nil {
+		globalConfig = Default()
+	}
+
+	switch key {
+	case "buffer_size":
+		var val int
+		if _, err := fmt.Sscanf(value, "%d", &val); err != nil {
+			return fmt.Errorf("invalid buffer_size value: %s", value)
+		}
+		if val < 100 {
+			return fmt.Errorf("buffer_size must be at least 100")
+		}
+		globalConfig.Buffer.Size = val
+
+	case "flush_interval":
+		var val int
+		if _, err := fmt.Sscanf(value, "%d", &val); err != nil {
+			return fmt.Errorf("invalid flush_interval value: %s", value)
+		}
+		if val < 1 {
+			return fmt.Errorf("flush_interval must be at least 1")
+		}
+		globalConfig.Buffer.FlushIntervalSeconds = val
+
+	case "max_memory_mb":
+		var val int
+		if _, err := fmt.Sscanf(value, "%d", &val); err != nil {
+			return fmt.Errorf("invalid max_memory_mb value: %s", value)
+		}
+		if val < 10 {
+			return fmt.Errorf("max_memory_mb must be at least 10")
+		}
+		globalConfig.Buffer.MaxMemoryMB = val
+
+	case "retention_days":
+		var val int
+		if _, err := fmt.Sscanf(value, "%d", &val); err != nil {
+			return fmt.Errorf("invalid retention_days value: %s", value)
+		}
+		if val < 1 {
+			return fmt.Errorf("retention_days must be at least 1")
+		}
+		globalConfig.Retention.Days = val
+
+	case "debug":
+		switch value {
+		case "true", "1", "enabled":
+			globalConfig.Debug.Enabled = true
+		case "false", "0", "disabled":
+			globalConfig.Debug.Enabled = false
+		default:
+			return fmt.Errorf("invalid debug value: %s (use true/false)", value)
+		}
+
+	default:
+		return fmt.Errorf("unknown configuration key: %s", key)
+	}
+
+	return nil
 }
 
-// GetFileRotation returns file rotation configuration
-func GetFileRotation() FileRotationConfig {
-	return Get().FileRotation
+// GetPath returns the default configuration file path
+func GetPath(dataDir string) string {
+	return filepath.Join(dataDir, "config.json")
 }
 
-// GetRetention returns retention configuration  
-func GetRetention() RetentionConfig {
-	return Get().Retention
-}
-
-// GetProcessDirs returns process directories configuration
-func GetProcessDirs() ProcessDirsConfig {
-	return Get().ProcessDirs
-}
-
-// GetCollector returns collector configuration
-func GetCollector() CollectorConfig {
-	return Get().Collector
-}
-
-// GetServer returns server configuration
-func GetServer() ServerConfig {
-	return Get().Server
-}
-
-// GetDebug returns debug configuration
-func GetDebug() DebugConfig {
-	return Get().Debug
-}
-
-// IsDebugEnabled returns true if any debug mode is enabled
+// IsDebugEnabled returns true if debug logging is enabled
 func IsDebugEnabled() bool {
-	debug := GetDebug()
-	return debug.EnableQueryDebug || debug.EnableBatchDebug || 
-		   debug.EnableServerDebug || debug.EnableDBDebug
+	return Get().Debug.Enabled
 }
 
-// IsQueryDebugEnabled returns true if query debug is enabled
-func IsQueryDebugEnabled() bool {
-	return GetDebug().EnableQueryDebug
-}
-
-// IsBatchDebugEnabled returns true if batch debug is enabled
-func IsBatchDebugEnabled() bool {
-	return GetDebug().EnableBatchDebug
-}
-
-// IsServerDebugEnabled returns true if server debug is enabled
-func IsServerDebugEnabled() bool {
-	return GetDebug().EnableServerDebug
-}
-
-// IsDBDebugEnabled returns true if DB debug is enabled
-func IsDBDebugEnabled() bool {
-	return GetDebug().EnableDBDebug
-}
-
-// UpdateBatchBuffer updates batch buffer configuration
-func UpdateBatchBuffer(config BatchBufferConfig) {
-	configMutex.Lock()
-	defer configMutex.Unlock()
-	
-	if globalConfig != nil {
-		globalConfig.BatchBuffer = config
+// isPipeMode checks if running in pipe mode
+func isPipeMode() bool {
+	stat, err := os.Stdin.Stat()
+	if err != nil {
+		return false
 	}
-}
-
-// UpdateDebug updates debug configuration
-func UpdateDebug(config DebugConfig) {
-	configMutex.Lock()
-	defer configMutex.Unlock()
-	
-	if globalConfig != nil {
-		globalConfig.Debug = config
-	}
-}
-
-// IsLoaded returns true if configuration has been loaded
-func IsLoaded() bool {
-	configMutex.RLock()
-	defer configMutex.RUnlock()
-	return configLoaded
-}
-
-// GetDefaultConfigPath returns the default configuration file path
-func GetDefaultConfigPath(dataDir string) string {
-	return filepath.Join(dataDir, "config", "config.json")
+	return (stat.Mode() & os.ModeCharDevice) == 0
 }

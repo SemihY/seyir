@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"seyir/internal/config"
 	"seyir/internal/logger"
 	"sync"
 	"time"
@@ -37,20 +38,16 @@ func GetUltraLightLoggerManager() *UltraLightLoggerManager {
 
 	if globalUltraLightManager == nil {
 		// Load configuration
-		config, err := LoadConfigFromFile(DefaultConfigPath)
-		if err != nil {
-			logger.Warn("Could not load config, using defaults: %v", err)
-			config = DefaultConfigFile()
-		}
+		cfg := config.Get()
 
 		globalUltraLightManager = &UltraLightLoggerManager{
 			loggers: make(map[string]*UltraLightLogger),
 			config: &UltraLightConfig{
-				Enabled:          config.UltraLight.Enabled,
-				BufferSize:       config.UltraLight.BufferSize,
-				ExportInterval:   config.UltraLight.ExportIntervalSeconds,
-				MaxMemoryMB:      config.UltraLight.MaxMemoryMB,
-				UseUltraFastMode: config.UltraLight.UseUltraFastMode,
+				Enabled:          true, // Always enabled in new system
+				BufferSize:       cfg.Buffer.Size,
+				ExportInterval:   cfg.Buffer.FlushIntervalSeconds,
+				MaxMemoryMB:      cfg.Buffer.MaxMemoryMB,
+				UseUltraFastMode: false, // Simplified in new system
 			},
 		}
 
