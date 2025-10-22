@@ -30,7 +30,7 @@ Built for developers who want to **pipe**, **store**, and **search** logs locall
 **One-line install (user-level):**
 
 ```bash
-curl -fsSL https://msemihy.github.io/seyir/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/semihy/seyir/main/scripts/install.sh | bash
 ```
 
 *(You can later replace the URL with your actual script hosting.)*
