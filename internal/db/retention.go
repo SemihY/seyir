@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"seyir/internal/config"
 	"seyir/internal/logger"
 	"sync"
 	"time"
@@ -37,13 +38,13 @@ type RetentionConfig struct {
 // DefaultRetentionConfig returns sensible defaults for retention
 func DefaultRetentionConfig() *RetentionConfig {
 	return &RetentionConfig{
-		Enabled:          false, // Disabled by default
-		RetentionDays:    30,    // Keep 30 days
-		CleanupInterval:  1 * time.Hour, // Check every hour
-		MaxFilesPerScan:  1000,  // Don't scan too many files at once
+		Enabled:          true,   // Enabled by default in new system
+		RetentionDays:    30,     // Keep 30 days
+		CleanupInterval:  24 * time.Hour, // Check every 24 hours
+		MaxFilesPerScan:  1000,   // Don't scan too many files at once
 		DryRun:           false,
-		KeepMinFiles:     5,     // Always keep at least 5 files per process
-		MaxTotalSizeGB:   10.0,  // Max 10GB total storage
+		KeepMinFiles:     10,     // Always keep at least 10 files per process
+		MaxTotalSizeGB:   10.0,   // Max 10GB total storage
 	}
 }
 
@@ -65,7 +66,18 @@ var (
 // GetRetentionManager returns the global retention manager
 func GetRetentionManager() *RetentionManager {
 	retentionManagerOnce.Do(func() {
-		globalRetentionManager = NewRetentionManager(DefaultRetentionConfig())
+		// Get retention config from global config
+		cfg := config.Get()
+		retentionConfig := &RetentionConfig{
+			Enabled:          cfg.Retention.Enabled,
+			RetentionDays:    cfg.Retention.Days,
+			CleanupInterval:  time.Duration(cfg.Retention.CleanupHours) * time.Hour,
+			MaxFilesPerScan:  1000, // Fixed value
+			DryRun:           false, // Fixed value
+			KeepMinFiles:     cfg.Retention.KeepMinFiles,
+			MaxTotalSizeGB:   cfg.Retention.MaxTotalSizeGB,
+		}
+		globalRetentionManager = NewRetentionManager(retentionConfig)
 	})
 	return globalRetentionManager
 }
@@ -387,6 +399,21 @@ func (rm *RetentionManager) Shutdown() {
 	rm.wg.Wait()
 	
 	logger.Info("Retention manager shutdown complete")
+}
+
+// RefreshConfigFromGlobal updates retention config from global config
+func (rm *RetentionManager) RefreshConfigFromGlobal() {
+	cfg := config.Get()
+	newConfig := &RetentionConfig{
+		Enabled:          cfg.Retention.Enabled,
+		RetentionDays:    cfg.Retention.Days,
+		CleanupInterval:  time.Duration(cfg.Retention.CleanupHours) * time.Hour,
+		MaxFilesPerScan:  1000, // Fixed value
+		DryRun:           false, // Fixed value
+		KeepMinFiles:     cfg.Retention.KeepMinFiles,
+		MaxTotalSizeGB:   cfg.Retention.MaxTotalSizeGB,
+	}
+	rm.UpdateConfig(newConfig)
 }
 
 // ForceCleanupOlderThan immediately deletes files older than the specified duration
