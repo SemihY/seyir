@@ -33,8 +33,6 @@ Built for developers who want to **pipe**, **store**, and **search** logs locall
 curl -fsSL https://semihy.github.io/seyir/scripts/install.sh | bash
 ```
 
-*(You can later replace the URL with your actual script hosting.)*
-
 Or manually:
 
 ```bash
