@@ -231,6 +231,19 @@
     #loading.active {
       display: inline-block !important;
     }
+    .time-preset {
+      background-color: #f8f9fa;
+      border: 1px solid #dee2e6;
+      color: #495057;
+    }
+    .time-preset:hover {
+      background-color: #e9ecef;
+    }
+    .time-preset.active {
+      background-color: #007bff;
+      color: white;
+      border-color: #007bff;
+    }
   </style>
 </head>
 <body>
@@ -268,11 +281,20 @@
     </div>
     <div class="filter-group">
       <label for="timeFromFilter">From Time</label>
-      <input type="datetime-local" id="timeFromFilter" />
+      <input type="datetime-local" id="timeFromFilter" title="Start time for log search (defaults to 24 hours ago)" />
     </div>
     <div class="filter-group">
       <label for="timeToFilter">To Time</label>
-      <input type="datetime-local" id="timeToFilter" />
+      <input type="datetime-local" id="timeToFilter" title="End time for log search (defaults to now)" />
+    </div>
+    <div class="filter-group">
+      <label>Quick Time Ranges</label>
+      <div style="display: flex; gap: 0.25rem; flex-wrap: wrap;">
+        <button type="button" id="last1h" class="time-preset" style="font-size: 0.75rem; padding: 0.2rem 0.4rem;">1h</button>
+        <button type="button" id="last6h" class="time-preset" style="font-size: 0.75rem; padding: 0.2rem 0.4rem;">6h</button>
+        <button type="button" id="last24h" class="time-preset" style="font-size: 0.75rem; padding: 0.2rem 0.4rem;">24h</button>
+        <button type="button" id="last7d" class="time-preset" style="font-size: 0.75rem; padding: 0.2rem 0.4rem;">7d</button>
+      </div>
     </div>
     <div class="filter-group">
       <label for="limitFilter">Limit</label>
@@ -287,8 +309,9 @@
 
   <div class="filter-actions">
     <button id="applyFilters">Apply Filters</button>
-    <button id="clearFilters" class="secondary">Clear All</button>
+    <button id="clearFilters" class="secondary" title="Reset all filters and set time range to last 24 hours">Clear All</button>
     <button id="refreshSources" class="secondary">Refresh Sources</button>
+    <small style="color: #666; margin-left: 1rem; font-size: 0.8rem;">Time range defaults to last 24 hours when not specified</small>
   </div>
 
   <div style="margin-top: 1rem; display: flex; align-items: center; gap: 1rem;">

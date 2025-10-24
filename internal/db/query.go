@@ -318,13 +318,19 @@ func Query(filter *QueryFilter) (*QueryResult, error) {
 	}
 	defer db.Close()
 	
-	// Build optimized parquet pattern using time-based folder structure
-	// Pattern: ~/.seyir/lake/[process]/year=YYYY/month=MM/day=DD/hour=HH/*.parquet
-	parquetPattern := buildTimeAwareParquetPattern(lakeDir, filter.StartTime, filter.EndTime, filter.ProcessName)
+	// Build optimized parquet patterns using time-based Hive partitioning
+	parquetPatterns := buildTimeAwareParquetPatterns(lakeDir, filter.StartTime, filter.EndTime, filter.ProcessName)
 	
 	// Check if any files exist in the time range
-	matches, err := filepath.Glob(parquetPattern)
-	if err != nil || len(matches) == 0 {
+	var allMatches []string
+	for _, pattern := range parquetPatterns {
+		matches, err := filepath.Glob(pattern)
+		if err == nil {
+			allMatches = append(allMatches, matches...)
+		}
+	}
+	
+	if len(allMatches) == 0 {
 		return &QueryResult{
 			Entries:      []*LogEntry{},
 			TotalCount:   0,
@@ -333,9 +339,23 @@ func Query(filter *QueryFilter) (*QueryResult, error) {
 		}, nil
 	}
 	
-	debugLog("DirectSearch scanning %d parquet files with pattern: %s", len(matches), parquetPattern)
+	debugLog("Query scanning %d parquet files across %d optimized time partitions", len(allMatches), len(parquetPatterns))
+	debugLog("Using Hive-aware patterns: %v", parquetPatterns)
 	
 	// Build efficient SQL query with full-text search capabilities
+	// DuckDB supports array of patterns for read_parquet
+	var parquetPatternSQL string
+	if len(parquetPatterns) == 1 {
+		parquetPatternSQL = fmt.Sprintf("'%s'", parquetPatterns[0])
+	} else {
+		// Use array syntax for multiple patterns: ['pattern1', 'pattern2', ...]
+		quotedPatterns := make([]string, len(parquetPatterns))
+		for i, pattern := range parquetPatterns {
+			quotedPatterns[i] = fmt.Sprintf("'%s'", pattern)
+		}
+		parquetPatternSQL = fmt.Sprintf("[%s]", strings.Join(quotedPatterns, ", "))
+	}
+	
 	baseSQL := fmt.Sprintf(`
 		SELECT ts, level, message, 
 		       COALESCE(trace_id, '') as trace_id,
@@ -343,7 +363,7 @@ func Query(filter *QueryFilter) (*QueryResult, error) {
 		       tags,
 		       id,
 		       process
-		FROM read_parquet('%s')`, parquetPattern)
+		FROM read_parquet(%s)`, parquetPatternSQL)
 	
 	// Build WHERE clause with comprehensive filters
 	whereConditions := []string{}
@@ -463,7 +483,7 @@ func Query(filter *QueryFilter) (*QueryResult, error) {
 		Entries:      entries,
 		TotalCount:   totalCount,
 		QueryTime:    time.Since(start),
-		FilesScanned: len(matches),
+		FilesScanned: len(allMatches),
 	}, nil
 }
 
@@ -481,17 +501,36 @@ func QueryCount(filter *QueryFilter) (int64, error) {
 	}
 	defer db.Close()
 	
-	// Build time-aware parquet pattern
-	parquetPattern := buildTimeAwareParquetPattern(lakeDir, filter.StartTime, filter.EndTime, filter.ProcessName)
+	// Build time-aware parquet patterns
+	parquetPatterns := buildTimeAwareParquetPatterns(lakeDir, filter.StartTime, filter.EndTime, filter.ProcessName)
 	
 	// Check if any files exist
-	matches, err := filepath.Glob(parquetPattern)
-	if err != nil || len(matches) == 0 {
+	var allMatches []string
+	for _, pattern := range parquetPatterns {
+		matches, err := filepath.Glob(pattern)
+		if err == nil {
+			allMatches = append(allMatches, matches...)
+		}
+	}
+	
+	if len(allMatches) == 0 {
 		return 0, nil
 	}
 	
-	// Build count SQL (same WHERE conditions as DirectSearch)
-	baseSQL := fmt.Sprintf("SELECT COUNT(*) FROM read_parquet('%s')", parquetPattern)
+	// Build count SQL using the same pattern approach as Query
+	var parquetPatternSQL string
+	if len(parquetPatterns) == 1 {
+		parquetPatternSQL = fmt.Sprintf("'%s'", parquetPatterns[0])
+	} else {
+		// Use array syntax for multiple patterns: ['pattern1', 'pattern2', ...]
+		quotedPatterns := make([]string, len(parquetPatterns))
+		for i, pattern := range parquetPatterns {
+			quotedPatterns[i] = fmt.Sprintf("'%s'", pattern)
+		}
+		parquetPatternSQL = fmt.Sprintf("[%s]", strings.Join(quotedPatterns, ", "))
+	}
+	
+	baseSQL := fmt.Sprintf("SELECT COUNT(*) FROM read_parquet(%s)", parquetPatternSQL)
 	
 	whereConditions := []string{}
 	args := []interface{}{}
@@ -555,18 +594,123 @@ func QueryCount(filter *QueryFilter) (int64, error) {
 	return count, nil
 }
 
-// buildTimeAwareParquetPattern creates an optimized parquet pattern based on time range
+// buildTimeAwareParquetPatterns creates optimized parquet patterns based on time range
 // If processName is provided, it searches only in that process's folder
-func buildTimeAwareParquetPattern(lakeDir string, startTime, endTime time.Time, processName string) string {
-	// For now, use a general pattern that covers all time ranges
-	// TODO: Optimize this to build specific year/month/day/hour patterns based on time range
-	
+// This function leverages Hive partitioning to only scan relevant time partitions
+func buildTimeAwareParquetPatterns(lakeDir string, startTime, endTime time.Time, processName string) []string {
 	processPattern := "*"
 	if processName != "" {
 		processPattern = processName
 	}
 	
-	return filepath.Join(lakeDir, processPattern, "year=*", "month=*", "day=*", "hour=*", "*.parquet")
+	// Generate all time partition patterns that overlap with the time range
+	timePatterns := buildHiveTimePatterns(startTime, endTime)
+	
+	if len(timePatterns) == 0 {
+		// Fallback to wildcard if no specific patterns generated
+		return []string{filepath.Join(lakeDir, processPattern, "year=*", "month=*", "day=*", "hour=*", "*.parquet")}
+	}
+	
+	// If we have many patterns, optimize based on time span
+	if len(timePatterns) > 168 { // More than a week of hours
+		debugLog("Many time patterns (%d), checking for day-level optimization", len(timePatterns))
+		
+		// If the time range spans many days, use day-level patterns instead of hour-level
+		dayPatterns := buildHiveDayPatterns(startTime, endTime)
+		if len(dayPatterns) < 50 { // Reasonable number of days
+			debugLog("Using %d day-level patterns instead of %d hour-level patterns", len(dayPatterns), len(timePatterns))
+			var dayPatternParts []string
+			for _, dayPattern := range dayPatterns {
+				dayPatternParts = append(dayPatternParts, filepath.Join(lakeDir, processPattern, dayPattern, "hour=*", "*.parquet"))
+			}
+			return dayPatternParts
+		}
+		
+		// If still too many, fall back to wildcards
+		debugLog("Too many patterns even at day level, using wildcards for efficiency")
+		return []string{filepath.Join(lakeDir, processPattern, "year=*", "month=*", "day=*", "hour=*", "*.parquet")}
+	}
+	
+	// Build multiple patterns for file system globbing
+	var patternParts []string
+	for _, timePattern := range timePatterns {
+		patternParts = append(patternParts, filepath.Join(lakeDir, processPattern, timePattern, "*.parquet"))
+	}
+	
+	return patternParts
+}
+
+// buildHiveTimePatterns generates Hive partition patterns for the given time range
+func buildHiveTimePatterns(startTime, endTime time.Time) []string {
+	var patterns []string
+	
+	// Ensure start is before end
+	if startTime.After(endTime) {
+		startTime, endTime = endTime, startTime
+	}
+	
+	// Round down start time to hour boundary
+	startHour := time.Date(startTime.Year(), startTime.Month(), startTime.Day(), startTime.Hour(), 0, 0, 0, startTime.Location())
+	
+	// Round up end time to hour boundary
+	endHour := time.Date(endTime.Year(), endTime.Month(), endTime.Day(), endTime.Hour(), 59, 59, 999999999, endTime.Location())
+	if endTime.Minute() > 0 || endTime.Second() > 0 || endTime.Nanosecond() > 0 {
+		endHour = endHour.Add(time.Hour)
+	}
+	
+	// Generate patterns for each hour in the range
+	current := startHour
+	for current.Before(endHour) || current.Equal(endHour) {
+		pattern := fmt.Sprintf("year=%d/month=%02d/day=%02d/hour=%02d",
+			current.Year(), current.Month(), current.Day(), current.Hour())
+		patterns = append(patterns, pattern)
+		
+		current = current.Add(time.Hour)
+		
+		// Safety check to prevent infinite loops
+		if len(patterns) > 8760 { // More than a year of hours
+			debugLog("Time range too large (%v to %v), limiting patterns", startTime, endTime)
+			break
+		}
+	}
+	
+	debugLog("Generated %d Hive partition patterns for time range %v to %v", len(patterns), startTime, endTime)
+	return patterns
+}
+
+// buildHiveDayPatterns generates day-level Hive partition patterns for the given time range
+func buildHiveDayPatterns(startTime, endTime time.Time) []string {
+	var patterns []string
+	
+	// Ensure start is before end
+	if startTime.After(endTime) {
+		startTime, endTime = endTime, startTime
+	}
+	
+	// Round down start time to day boundary
+	startDay := time.Date(startTime.Year(), startTime.Month(), startTime.Day(), 0, 0, 0, 0, startTime.Location())
+	
+	// Round up end time to day boundary
+	endDay := time.Date(endTime.Year(), endTime.Month(), endTime.Day(), 23, 59, 59, 999999999, endTime.Location())
+	
+	// Generate patterns for each day in the range
+	current := startDay
+	for current.Before(endDay) || current.Equal(endDay) {
+		pattern := fmt.Sprintf("year=%d/month=%02d/day=%02d",
+			current.Year(), current.Month(), current.Day())
+		patterns = append(patterns, pattern)
+		
+		current = current.AddDate(0, 0, 1) // Add one day
+		
+		// Safety check to prevent infinite loops
+		if len(patterns) > 366 { // More than a year of days
+			debugLog("Day range too large (%v to %v), limiting patterns", startTime, endTime)
+			break
+		}
+	}
+	
+	debugLog("Generated %d day-level Hive partition patterns for time range %v to %v", len(patterns), startTime, endTime)
+	return patterns
 }
 
 

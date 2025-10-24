@@ -45,6 +45,66 @@ class LogViewer {
     this.applyFiltersBtn = document.getElementById("applyFilters");
     this.clearFiltersBtn = document.getElementById("clearFilters");
     this.refreshSourcesBtn = document.getElementById("refreshSources");
+
+    // Time preset buttons
+    this.timePresets = {
+      last1h: document.getElementById("last1h"),
+      last6h: document.getElementById("last6h"),
+      last24h: document.getElementById("last24h"),
+      last7d: document.getElementById("last7d"),
+    };
+
+    // Set default time range (last 24 hours)
+    this.setDefaultTimeRange();
+  }
+
+  setDefaultTimeRange() {
+    this.setTimeRange("last24h");
+  }
+
+  setTimeRange(preset) {
+    if (!this.timeFromFilter || !this.timeToFilter) return;
+
+    const now = new Date();
+    let fromTime;
+
+    switch (preset) {
+      case "last1h":
+        fromTime = new Date(now.getTime() - 1 * 60 * 60 * 1000);
+        break;
+      case "last6h":
+        fromTime = new Date(now.getTime() - 6 * 60 * 60 * 1000);
+        break;
+      case "last24h":
+        fromTime = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+        break;
+      case "last7d":
+        fromTime = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        break;
+      default:
+        fromTime = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    }
+
+    // Format for datetime-local input (YYYY-MM-DDTHH:MM)
+    const formatDateTime = (date) => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const day = String(date.getDate()).padStart(2, "0");
+      const hours = String(date.getHours()).padStart(2, "0");
+      const minutes = String(date.getMinutes()).padStart(2, "0");
+      return `${year}-${month}-${day}T${hours}:${minutes}`;
+    };
+
+    this.timeFromFilter.value = formatDateTime(fromTime);
+    this.timeToFilter.value = formatDateTime(now);
+
+    // Update active button state
+    Object.values(this.timePresets).forEach((btn) => {
+      if (btn) btn.classList.remove("active");
+    });
+    if (this.timePresets[preset]) {
+      this.timePresets[preset].classList.add("active");
+    }
   }
 
   initEventListeners() {
@@ -118,6 +178,16 @@ class LogViewer {
         }
       });
     }
+
+    // Time preset buttons
+    Object.entries(this.timePresets).forEach(([key, button]) => {
+      if (button) {
+        button.addEventListener("click", () => {
+          this.setTimeRange(key);
+          this.applyFilters();
+        });
+      }
+    });
   }
 
   applyFilters() {
@@ -193,9 +263,10 @@ class LogViewer {
     if (this.sourceFilter) this.sourceFilter.value = "";
     if (this.levelFilter) this.levelFilter.value = "";
     if (this.traceIdFilter) this.traceIdFilter.value = "";
-    if (this.timeFromFilter) this.timeFromFilter.value = "";
-    if (this.timeToFilter) this.timeToFilter.value = "";
     if (this.limitFilter) this.limitFilter.value = "100";
+
+    // Reset time filters to default (last 24 hours)
+    this.setDefaultTimeRange();
 
     // Apply cleared filters
     this.applyFilters();
