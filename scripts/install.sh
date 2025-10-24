@@ -29,15 +29,21 @@ curl -L "$ASSET_URL" -o "$TMP_DIR/seyir.tar.gz"
 
 # Extract binary
 tar -xzf "$TMP_DIR/seyir.tar.gz" -C "$TMP_DIR"
-chmod +x "$TMP_DIR/seyir"
+# Find the binary (it might be in a subdirectory due to wrap_in_directory)
+BINARY_PATH=$(find "$TMP_DIR" -name "seyir" -type f | head -1)
+if [ -z "$BINARY_PATH" ]; then
+  echo "❌ Could not find seyir binary in archive"
+  exit 1
+fi
+chmod +x "$BINARY_PATH"
 
 # Install binary
 if [ -w "$INSTALL_DIR" ]; then
-  mv "$TMP_DIR/seyir" "$INSTALL_DIR/seyir"
+  mv "$BINARY_PATH" "$INSTALL_DIR/seyir"
   DEST="$INSTALL_DIR/seyir"
 else
   mkdir -p "$LOCAL_BIN"
-  mv "$TMP_DIR/seyir" "$LOCAL_BIN/seyir"
+  mv "$BINARY_PATH" "$LOCAL_BIN/seyir"
   DEST="$LOCAL_BIN/seyir"
   if ! echo "$PATH" | grep -q "$LOCAL_BIN"; then
     echo "⚠️  Add $LOCAL_BIN to your PATH:"
