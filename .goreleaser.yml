@@ -4,7 +4,7 @@ version: 2
 project_name: seyir
 
 env:
-  - CGO_ENABLED=0
+  - CGO_ENABLED=1
 
 before:
   hooks:
@@ -14,12 +14,17 @@ builds:
   - id: seyir
     main: ./cmd/seyir/main.go
     binary: seyir
+    env:
+      - CGO_ENABLED=1
     goos:
       - linux
       - darwin
     goarch:
       - amd64
       - arm64
+    ignore:
+      - goos: linux
+        goarch: arm64
     ldflags:
       - "-s -w"
 
@@ -45,7 +50,7 @@ checksum:
   name_template: "checksums.txt"
 
 snapshot:
-  name_template: "{{ incpatch .Version }}-next"
+  version_template: "{{ incpatch .Version }}-next"
 
 changelog:
   sort: asc
