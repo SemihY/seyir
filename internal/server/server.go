@@ -120,7 +120,11 @@ func (s *Server) serveQueryAPI(w http.ResponseWriter, r *http.Request) {
 		filter.TraceIDs = []string{traceId}
 	}
 	
-	// Parse time range
+	// Parse time range - if not provided, default to last 24 hours
+	now := time.Now()
+	filter.StartTime = now.Add(-24 * time.Hour) // Default: last 24 hours
+	filter.EndTime = now
+	
 	if from := query.Get("from"); from != "" {
 		if t, err := parseTimeParam(from); err == nil {
 			filter.StartTime = t
@@ -131,6 +135,16 @@ func (s *Server) serveQueryAPI(w http.ResponseWriter, r *http.Request) {
 		if t, err := parseTimeParam(to); err == nil {
 			filter.EndTime = t
 		}
+	}
+	
+	// Parse process filter
+	if process := query.Get("process"); process != "" {
+		filter.ProcessName = process
+	}
+	
+	// Parse message search
+	if search := query.Get("search"); search != "" {
+		filter.MessageSearch = search
 	}
 	
 	// Parse limit
@@ -147,8 +161,8 @@ func (s *Server) serveQueryAPI(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	
-	// Execute fast query
-	result, err := db.FastQuery(filter)
+	// Execute query
+	result, err := db.Query(filter)
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error": "%s"}`, err.Error()), http.StatusInternalServerError)
 		return
@@ -216,7 +230,7 @@ func (s *Server) serveDistinctAPI(w http.ResponseWriter, r *http.Request) {
 }
 
 // parseTimeParam parses time parameter in various formats
-func parseTimeParam(timeStr string) (*time.Time, error) {
+func parseTimeParam(timeStr string) (time.Time, error) {
 	// Try different time formats
 	formats := []string{
 		"2006-01-02 15:04:05",
@@ -227,11 +241,11 @@ func parseTimeParam(timeStr string) (*time.Time, error) {
 	
 	for _, format := range formats {
 		if t, err := time.Parse(format, timeStr); err == nil {
-			return &t, nil
+			return t, nil
 		}
 	}
 	
-	return nil, fmt.Errorf("invalid time format: %s", timeStr)
+	return time.Time{}, fmt.Errorf("invalid time format: %s", timeStr)
 }
 
 // serveHealthAPI handles the /api/health endpoint

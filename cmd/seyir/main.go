@@ -115,8 +115,6 @@ func main() {
 	if err := config.Load(configPath); err != nil {
 		logger.Warn("Failed to load configuration from %s: %v", configPath, err)
 		logger.Info("Using default configuration")
-	} else {
-		logger.Info("Configuration loaded from %s", configPath)
 	}
 	
 	args := flag.Args()
@@ -534,22 +532,24 @@ func runBatchExample() {
 
 // Query command functions
 func runQueryUsage() {
-	fmt.Println("seyir query - Fast querying with projection pushdown optimization")
+	fmt.Println("seyir query - Unified querying with folder structure optimization")
 	fmt.Println("")
-	fmt.Println("UI Columns: ts, level, message, trace_id, source, tags")
-	fmt.Println("Projection pushdown provides maximum performance by only selecting needed columns")
+	fmt.Println("UI Columns: ts, level, message, trace_id, source, tags, process")
+	fmt.Println("Supports full-text search and folder-level optimization")
 	fmt.Println("")
 	fmt.Println("Usage:")
 	fmt.Println("    seyir query [subcommand] [options]")
 	fmt.Println("")
 	fmt.Println("Subcommands:")
-	fmt.Println("    filter      Query with filters (exact matches only, no LIKE)")
+	fmt.Println("    filter      Query with filters (includes full-text search)")
 	fmt.Println("    distinct    Get distinct values for a column")
 	fmt.Println("    timerange   Show time range of all logs")
 	fmt.Println("")
-	fmt.Println("Available Filters (exact matches only):")
+	fmt.Println("Available Filters:")
 	fmt.Println("    --start         Time range start (2006-01-02 15:04:05)")
 	fmt.Println("    --end           Time range end")
+	fmt.Println("    --process       Process name (enables folder optimization)")
+	fmt.Println("    --search        Message text search (supports full-text)")
 	fmt.Println("    --sources       Source values (comma-separated)")
 	fmt.Println("    --levels        Level values (comma-separated)")
 	fmt.Println("    --trace-ids     Trace ID values (comma-separated)")
@@ -558,17 +558,17 @@ func runQueryUsage() {
 	fmt.Println("    --offset        Result offset")
 	fmt.Println("")
 	fmt.Println("Examples:")
-	fmt.Println("    # Query by time range")
+	fmt.Println("    # Query by time range (defaults to last 24h)")
 	fmt.Println("    seyir query filter --start='2025-01-01 00:00:00' --end='2025-01-02 00:00:00'")
 	fmt.Println("")
-	fmt.Println("    # Query by exact values")
-	fmt.Println("    seyir query filter --sources='app,worker' --levels='ERROR,WARN'")
+	fmt.Println("    # Full-text search with process filter")
+	fmt.Println("    seyir query filter --process=myapp --search='database error' --levels='ERROR'")
 	fmt.Println("")
 	fmt.Println("    # Query by trace IDs")
 	fmt.Println("    seyir query filter --trace-ids='abc123,def456' --limit=100")
 	fmt.Println("")
-	fmt.Println("    # Query with tags")
-	fmt.Println("    seyir query filter --tags='urgent,critical' --levels='ERROR'")
+	fmt.Println("    # Search across all processes")
+	fmt.Println("    seyir query filter --search='timeout' --levels='ERROR,WARN'")
 	fmt.Println("")
 	fmt.Println("    # Get distinct sources")
 	fmt.Println("    seyir query distinct --column=source --limit=50")
@@ -599,9 +599,12 @@ func runQueryCommand(args []string) {
 }
 
 func runQueryFilter(args []string) {
-	// Parse filter arguments
+	// Parse filter arguments - default to last 24 hours if no time range specified
+	now := time.Now()
 	filter := &db.QueryFilter{
-		Limit: 100, // Default limit
+		StartTime: now.Add(-24 * time.Hour), // Default: last 24 hours
+		EndTime:   now,
+		Limit:     100, // Default limit
 	}
 	
 	i := 0
@@ -610,7 +613,7 @@ func runQueryFilter(args []string) {
 		case "--start":
 			if i+1 < len(args) {
 				if t, err := time.Parse("2006-01-02 15:04:05", args[i+1]); err == nil {
-					filter.StartTime = &t
+					filter.StartTime = t
 				} else {
 					fmt.Printf("Invalid start time format: %s (use: 2006-01-02 15:04:05)\n", args[i+1])
 					return
@@ -623,7 +626,7 @@ func runQueryFilter(args []string) {
 		case "--end":
 			if i+1 < len(args) {
 				if t, err := time.Parse("2006-01-02 15:04:05", args[i+1]); err == nil {
-					filter.EndTime = &t
+					filter.EndTime = t
 				} else {
 					fmt.Printf("Invalid end time format: %s (use: 2006-01-02 15:04:05)\n", args[i+1])
 					return
@@ -631,6 +634,22 @@ func runQueryFilter(args []string) {
 				i += 2
 			} else {
 				fmt.Println("--end requires a value")
+				return
+			}
+		case "--process":
+			if i+1 < len(args) {
+				filter.ProcessName = args[i+1]
+				i += 2
+			} else {
+				fmt.Println("--process requires a value")
+				return
+			}
+		case "--search":
+			if i+1 < len(args) {
+				filter.MessageSearch = args[i+1]
+				i += 2
+			} else {
+				fmt.Println("--search requires a value")
 				return
 			}
 		case "--sources":
@@ -702,8 +721,8 @@ func runQueryFilter(args []string) {
 	db.SetGlobalLakeDir(filepath.Join(dataDir, "lake"))
 	
 	// Execute query
-	fmt.Println("Executing fast query...")
-	result, err := db.FastQuery(filter)
+	fmt.Println("Executing query...")
+	result, err := db.Query(filter)
 	if err != nil {
 		fmt.Printf("Query failed: %v\n", err)
 		return
@@ -862,7 +881,7 @@ func runSearchUsage() {
 	fmt.Print(`Usage: seyir search [flags]
 
 Flags:
-  --process <name>      Filter by process name
+  --process <name>      Filter by process name (optional, enables optimization)
   --trace-id <id>       Filter by trace ID
   --level <level>       Filter by log level (INFO, WARN, ERROR, DEBUG)
   --source <source>     Filter by source
@@ -875,14 +894,14 @@ Examples:
   # Search for errors in a specific process
   seyir search --process myapp --level ERROR --limit 100
 
-  # Search by trace ID
+  # Search by trace ID across all processes
   seyir search --trace-id abc-123-def
 
   # Search logs from last 2 hours
   seyir search --level WARN --since 2h
 
-  # Search with time range
-  seyir search --start 2025-10-21T00:00:00Z --end 2025-10-21T12:00:00Z
+  # Search with time range across all processes
+  seyir search --start 2025-10-21T00:00:00Z --end 2025-10-21T12:00:00Z --level ERROR
 `)
 }
 
@@ -905,13 +924,28 @@ func runSearchCommand(args []string) {
 	dataDir := getDataDir()
 	db.SetGlobalLakeDir(filepath.Join(dataDir, "lake"))
 
-	// Build query
-	query := db.ColumnarQuery{
-		Process: *processName,
-		TraceID: *traceID,
-		Level:   *level,
-		Source:  *source,
-		Limit:   *limit,
+	// Build query filter - default to last 24 hours if no time specified
+	now := time.Now()
+	filter := &db.QueryFilter{
+		StartTime: now.Add(-24 * time.Hour), // Default: last 24 hours
+		EndTime:   now,
+		Limit:     *limit,
+	}
+
+	// Set process filter
+	if *processName != "" {
+		filter.ProcessName = *processName
+	}
+	
+	// Set other filters
+	if *traceID != "" {
+		filter.TraceIDs = []string{*traceID}
+	}
+	if *level != "" {
+		filter.Levels = []string{*level}
+	}
+	if *source != "" {
+		filter.Sources = []string{*source}
 	}
 
 	// Parse time filters
@@ -921,8 +955,8 @@ func runSearchCommand(args []string) {
 			fmt.Printf("Invalid duration format: %v\n", err)
 			os.Exit(1)
 		}
-		query.StartTime = time.Now().Add(-duration)
-		query.EndTime = time.Now()
+		filter.StartTime = time.Now().Add(-duration)
+		filter.EndTime = time.Now()
 	}
 
 	if *startTime != "" {
@@ -931,7 +965,7 @@ func runSearchCommand(args []string) {
 			fmt.Printf("Invalid start time format: %v\n", err)
 			os.Exit(1)
 		}
-		query.StartTime = t
+		filter.StartTime = t
 	}
 
 	if *endTime != "" {
@@ -940,26 +974,23 @@ func runSearchCommand(args []string) {
 			fmt.Printf("Invalid end time format: %v\n", err)
 			os.Exit(1)
 		}
-		query.EndTime = t
-	}
-
-	// Determine which process to search
-	searchProcess := *processName
-	if searchProcess == "" {
-		// If no process specified, try to find the most recent one
-		// For now, we'll require a process name
-		fmt.Println("Error: --process flag is required")
-		fmt.Println("Use 'seyir sessions' to see available processes")
-		os.Exit(1)
+		filter.EndTime = t
 	}
 
 	// Perform search
-	fmt.Printf("Searching logs for process '%s'...\n", searchProcess)
-	results, err := db.SearchParquetWithDuckDB(searchProcess, query)
+	if filter.ProcessName != "" {
+		fmt.Printf("Searching logs for process '%s'...\n", filter.ProcessName)
+	} else {
+		fmt.Println("Searching logs across all processes...")
+	}
+	
+	result, err := db.Query(filter)
 	if err != nil {
 		fmt.Printf("Search failed: %v\n", err)
 		os.Exit(1)
 	}
+	
+	results := result.Entries
 
 	// Display results
 	if len(results) == 0 {

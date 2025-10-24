@@ -19,11 +19,10 @@ type UltraLightLoggerManager struct {
 
 // UltraLightConfig contains configuration for ultra-lightweight logging
 type UltraLightConfig struct {
-	Enabled          bool
-	BufferSize       int
-	ExportInterval   int // seconds
-	MaxMemoryMB      int
-	UseUltraFastMode bool
+	Enabled        bool
+	BufferSize     int
+	ExportInterval int // seconds
+	MaxMemoryMB    int
 }
 
 var (
@@ -43,11 +42,10 @@ func GetUltraLightLoggerManager() *UltraLightLoggerManager {
 		globalUltraLightManager = &UltraLightLoggerManager{
 			loggers: make(map[string]*UltraLightLogger),
 			config: &UltraLightConfig{
-				Enabled:          true, // Always enabled in new system
-				BufferSize:       cfg.Buffer.Size,
-				ExportInterval:   cfg.Buffer.FlushIntervalSeconds,
-				MaxMemoryMB:      cfg.Buffer.MaxMemoryMB,
-				UseUltraFastMode: false, // Simplified in new system
+				Enabled:        true, // Always enabled in new system
+				BufferSize:     cfg.Buffer.Size,
+				ExportInterval: cfg.Buffer.FlushIntervalSeconds,
+				MaxMemoryMB:    cfg.Buffer.MaxMemoryMB,
 			},
 		}
 
@@ -75,7 +73,6 @@ func (ullm *UltraLightLoggerManager) GetOrCreateLogger(processName string) (*Ult
 		processName,
 		ullm.config.BufferSize,
 		ullm.getExportInterval(),
-		ullm.config.UseUltraFastMode,
 	)
 
 	// Start the logger

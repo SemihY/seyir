@@ -20,7 +20,6 @@ type UltraLightLogger struct {
 	wg              sync.WaitGroup
 
 	// Configuration
-	ultraFastMode bool
 	autoExport    bool
 
 	// Statistics
@@ -31,7 +30,7 @@ type UltraLightLogger struct {
 }
 
 // NewUltraLightLogger creates a new ultra-lightweight logger
-func NewUltraLightLogger(processName string, bufferSize int, exportInterval time.Duration, ultraFastMode bool) *UltraLightLogger {
+func NewUltraLightLogger(processName string, bufferSize int, exportInterval time.Duration) *UltraLightLogger {
 	baseDir := GetGlobalLakeDir()
 
 	return &UltraLightLogger{
@@ -39,7 +38,6 @@ func NewUltraLightLogger(processName string, bufferSize int, exportInterval time
 		ringBuffer:      NewRingBuffer[*LogEntry](bufferSize),
 		parquetStreamer: NewParquetStreamer(baseDir),
 		exportInterval:  exportInterval,
-		ultraFastMode:   ultraFastMode,
 		autoExport:      true,
 		stopChan:        make(chan struct{}),
 		lastExport:      time.Now(),
@@ -63,13 +61,8 @@ func (ull *UltraLightLogger) Start() error {
 		go ull.backgroundExport()
 	}
 
-	mode := "Standard"
-	if ull.ultraFastMode {
-		mode = "Ultra-Fast"
-	}
-
-	logger.Info("UltraLightLogger started for process %s (mode: %s, buffer: %d, export: %v)",
-		ull.processName, mode, ull.ringBuffer.MaxSize(), ull.exportInterval)
+	logger.Info("UltraLightLogger started for process %s (buffer: %d, export: %v)",
+		ull.processName, ull.ringBuffer.MaxSize(), ull.exportInterval)
 
 	return nil
 }
@@ -152,15 +145,8 @@ func (ull *UltraLightLogger) ExportToParquet() error {
 
 	start := time.Now()
 
-	var fileSize int64
-	var err error
-
-	// Choose export method based on mode
-	if ull.ultraFastMode {
-		_, fileSize, err = ull.parquetStreamer.StreamToParquetFast(entries, ull.processName)
-	} else {
-		_, fileSize, err = ull.parquetStreamer.StreamToParquet(entries, ull.processName)
-	}
+	// Export to parquet
+	_, fileSize, err := ull.parquetStreamer.StreamToParquet(entries, ull.processName)
 
 	if err != nil {
 		return fmt.Errorf("failed to export to parquet: %v", err)
@@ -181,18 +167,6 @@ func (ull *UltraLightLogger) ExportToParquet() error {
 	return nil
 }
 
-// Search performs a columnar search across parquet files using DuckDB
-func (ull *UltraLightLogger) Search(query ColumnarQuery) ([]*LogEntry, error) {
-	// Set default limit if not specified
-	if query.Limit <= 0 {
-		query.Limit = 1000
-	}
-
-	// DuckDB will directly query parquet files
-	// Implementation will be in query.go using DuckDB's read_parquet()
-	return SearchParquetWithDuckDB(ull.processName, query)
-}
-
 // GetStats returns statistics about the ultra-lightweight logger
 func (ull *UltraLightLogger) GetStats() UltraLightStats {
 	bufferStats := ull.ringBuffer.Stats()
@@ -206,9 +180,6 @@ func (ull *UltraLightLogger) GetStats() UltraLightStats {
 		TotalExports:      ull.totalExports,
 		ExportErrors:      ull.exportErrors,
 		LastExport:        ull.lastExport,
-		TotalFiles:        0, // Will be calculated by DuckDB query if needed
-		TotalStorageSize:  0, // Will be calculated by DuckDB query if needed
-		UltraFastMode:     ull.ultraFastMode,
 	}
 }
 
@@ -222,7 +193,4 @@ type UltraLightStats struct {
 	TotalExports      int64     `json:"total_exports"`
 	ExportErrors      int64     `json:"export_errors"`
 	LastExport        time.Time `json:"last_export"`
-	TotalFiles        int       `json:"total_files"`
-	TotalStorageSize  int64     `json:"total_storage_size"`
-	UltraFastMode     bool      `json:"ultra_fast_mode"`
 }
