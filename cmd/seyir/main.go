@@ -12,6 +12,7 @@ import (
 	"seyir/internal/db"
 	"seyir/internal/logger"
 	"seyir/internal/server"
+	"seyir/internal/version"
 	"strconv"
 	"strings"
 	"syscall"
@@ -32,9 +33,8 @@ func getDataDir() string {
 
 // showUsage displays usage information and examples
 func showUsage() {
-	fmt.Println(`seyir - Centralized Log Collector & Viewer
-
-Usage:
+	fmt.Printf("seyir %s - Centralized Log Collector & Viewer\n\n", version.Get().Short())
+	fmt.Println(`Usage:
     seyir [flags] <command>
     command | seyir                        # Pipe mode
 
@@ -45,6 +45,7 @@ Commands:
     sessions    Show active log sessions
     cleanup     Clean up old log sessions
     batch       Manage batch buffer settings and statistics
+    version     Show version information
     help        Show this help
 
 Flags:`)
@@ -100,10 +101,18 @@ var (
 	port        = flag.String("port", "5555", "Port for web server")
 	searchQuery = flag.String("search", "", "Search logs (use '*' for all logs)")
 	limit       = flag.Int("limit", 100, "Search result limit")
+	showVersion = flag.Bool("version", false, "Show version information")
+	showVersionShort = flag.Bool("v", false, "Show version information (short)")
 )
 
 func main() {
 	flag.Parse()
+	
+	// Handle version flags first
+	if *showVersion || *showVersionShort {
+		fmt.Println(version.Get().String())
+		return
+	}
 	
 	// Set up the lake directory where all session DBs will be stored
 	dataDir := getDataDir()
@@ -160,6 +169,8 @@ func main() {
 			os.Exit(1)
 		}
 		runBatchCommand(args[1:])
+	case "version":
+		fmt.Println(version.Get().String())
 	case "help", "--help", "-h":
 		showUsage()
 	default:
@@ -279,7 +290,7 @@ func runWebServer(port string) {
 
 // runServiceMode starts both Docker collection and web server
 func runServiceMode(port string) {
-	logger.Info("🚀 Starting seyir service")
+	logger.Info("🚀 Starting seyir service v%s", version.GetVersion())
 	logger.Info("🌐 Web interface: http://localhost:%s", port)
 	logger.Info("🔍 Auto-discovering containers with 'seyir.enable=true' label")
 
@@ -419,6 +430,7 @@ func runBatchConfig(args []string) {
 func runBatchConfigGet() {
 	cfg := config.Get()
 
+	fmt.Printf("seyir %s\n", version.Get().Short())
 	fmt.Println("Current Configuration:")
 	fmt.Printf("  Buffer Size: %d entries\n", cfg.Buffer.Size)
 	fmt.Printf("  Flush Interval: %d seconds\n", cfg.Buffer.FlushIntervalSeconds)

@@ -1,16 +1,27 @@
-.PHONY: build install install-user clean run deps uninstall help
+.PHONY: build install install-user clean run deps uninstall help version
 
 # Variables
 APP_NAME=seyir
 BUILD_DIR=bin
 INSTALL_DIR=/usr/local/bin
 
+# Version information
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+COMMIT ?= $(shell git rev-parse HEAD 2>/dev/null || echo "unknown")
+BUILD_DATE ?= $(shell date -u '+%Y-%m-%d_%H:%M:%S')
+
+# Build flags
+LDFLAGS = -X seyir/internal/version.Version=$(VERSION) \
+          -X seyir/internal/version.Commit=$(COMMIT) \
+          -X seyir/internal/version.BuildDate=$(BUILD_DATE)
+
 # Build commands
 build:
-	@echo "🔨 Building seyir..."
+	@echo "🔨 Building seyir $(VERSION)..."
 	@mkdir -p $(BUILD_DIR)
-	@go build -o $(BUILD_DIR)/$(APP_NAME) ./cmd/seyir
+	@go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(APP_NAME) ./cmd/seyir
 	@echo "✅ Build complete: $(BUILD_DIR)/$(APP_NAME)"
+	@echo "📋 Version: $(VERSION) ($(COMMIT))"
 
 # Install system-wide
 install: build
@@ -55,6 +66,13 @@ uninstall:
 	sudo rm -rf /usr/local/share/seyir
 	@echo "Uninstallation complete."
 
+# Show version information
+version:
+	@echo "seyir Version Information:"
+	@echo "  Version: $(VERSION)"
+	@echo "  Commit:  $(COMMIT)"
+	@echo "  Date:    $(BUILD_DATE)"
+
 # Show usage help
 help:
 	@echo "seyir - Build Commands"
@@ -67,6 +85,7 @@ help:
 	@echo "   make clean         - Clean build artifacts"
 	@echo "   make run           - Run in development mode"
 	@echo "   make deps          - Install Go dependencies"
+	@echo "   make version       - Show version information"
 	@echo ""
 	@echo "🎯 Usage examples:"
 	@echo "   seyir service --port 8080"

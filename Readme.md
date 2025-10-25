@@ -27,17 +27,34 @@ Built for developers who want to **pipe**, **store**, and **search** logs locall
 
 ### 1. Install
 
-**One-line install (user-level):**
+**Quick install (Linux/macOS):**
 
 ```bash
-curl -fsSL https://semihy.github.io/seyir/scripts/install.sh | bash
+# Latest version
+curl -L "https://github.com/SemihY/seyir/releases/latest/download/seyir_$(uname -s)_$(uname -m).tar.gz" | tar xz
+sudo mv seyir /usr/local/bin/
+
+# Verify installation
+seyir version
 ```
 
-Or manually:
+**Docker:**
 
 ```bash
-make install-user   # Local
-make install        # System-wide
+docker run -d \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v seyir-data:/app/data \
+  -p 8080:8080 \
+  ghcr.io/semihy/seyir:latest
+```
+
+**From source:**
+
+```bash
+git clone https://github.com/SemihY/seyir.git
+cd seyir
+make install-user   # Local (~/.local/bin)
+make install        # System-wide (/usr/local/bin)
 ```
 
 ---
@@ -102,13 +119,116 @@ seyir service restart
 ```
 
 
-## 🧩 Coolify Integration
+## 🐳 Coolify Deployment
 
-Seyir runs perfectly as a self-hosted app on [Coolify](https://coolify.io/):
+Deploy Seyir as a self-hosted log collector on [Coolify](https://coolify.io/) with zero configuration:
 
+### Quick Setup
 
-> Once deployed, you can view logs from Docker containers or stream local logs directly through the web UI.
+1. **Create New Resource** → **Docker Service**
+2. **Image:** `ghcr.io/semihy/seyir:latest`
+3. **Port:** `5555:5555`
+4. **Deploy** ✅
 
+### Detailed Configuration
+
+**Docker Image Settings:**
+```
+Image: ghcr.io/semihy/seyir:latest
+Tag: latest (or specific version like v1.0.0)
+```
+
+**Port Mapping:**
+```
+Internal Port: 5555
+External Port: 5555 (or your preferred port)
+```
+
+**Volume Mappings:**
+```bash
+# Docker socket for container discovery
+/var/run/docker.sock → /var/run/docker.sock (bind mount)
+
+# Persistent log storage
+seyir-data → /app/data (named volume)
+```
+
+**Environment Variables:**
+```bash
+PORT=5555                    # Web server port
+```
+
+### Container Auto-Discovery
+
+Once deployed, Seyir automatically discovers Docker containers. To make your containers visible in Seyir, add labels:
+
+```yaml
+# In your docker-compose.yml or Coolify service
+services:
+  your-app:
+    image: your-app:latest
+    labels:
+      - "seyir.enable=true"
+      - "seyir.name=My Application"
+      - "seyir.description=Production API service"
+      - "seyir.env=production"
+```
+
+### Access & Usage
+
+After deployment:
+- **Web UI:** `https://your-domain.com` (via Coolify proxy)
+- **Direct Access:** `http://server-ip:5555`
+
+### Version Updates
+
+To update Seyir in Coolify:
+
+1. **Auto-update:** Enable auto-deploy for `latest` tag
+2. **Manual:** Change image tag to specific version: `ghcr.io/semihy/seyir:v1.2.0`
+3. **Redeploy** the service
+
+### Backup & Persistence
+
+Seyir stores logs in `/app/data` - ensure this volume is backed up:
+
+### Troubleshooting
+
+**Can't see containers:**
+- Ensure `/var/run/docker.sock` is mounted
+- Add `seyir.enable=true` label to containers
+- Check Seyir logs for discovery errors
+
+**Performance issues:**
+- Increase volume size for log storage
+- Configure log retention in Seyir settings
+- Monitor disk usage in Coolify
+
+### Example Coolify Configuration
+
+**Service Configuration:**
+```yaml
+# Coolify Docker Service Settings
+name: seyir
+image: ghcr.io/semihy/seyir:latest
+ports:
+  - "5555:5555"
+volumes:
+  - "/var/run/docker.sock:/var/run/docker.sock"
+  - "seyir-data:/app/data"
+environment:
+  PORT: "5555"
+restart: unless-stopped
+```
+
+**Domain & SSL:**
+- Enable Coolify's automatic SSL
+- Set custom domain: `logs.yourdomain.com`
+- Configure basic auth if needed for security
+
+Once deployed, you can view logs from all your Coolify services in one centralized location! 🚀
+
+---
 
 ## 🤝 Contributing
 
@@ -121,7 +241,11 @@ Open an issue or PR at [github.com/SemihY/seyir](https://github.com/semihy/seyir
 
 ```bash
 seyir --version
-# seyir 0.3.1 (build 2025-10-20)
+# Version: v1.0.0
+# Commit: a1b2c3d4
+# Built: 2025-10-25_14:30:15
+# Go: go1.24.7
+# Platform: linux/amd64
 ```
 
 ---

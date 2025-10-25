@@ -17,20 +17,30 @@ builds:
     env:
       - CGO_ENABLED=1
     goos:
+      - linux
       - darwin
+      - windows
     goarch:
       - amd64
       - arm64
+    # Skip Windows ARM64 for now due to potential CGO issues with DuckDB
+    ignore:
+      - goos: windows
+        goarch: arm64
+    # Inject version information at build time
     ldflags:
       - "-s -w"
+      - "-X seyir/internal/version.Version={{.Version}}"
+      - "-X seyir/internal/version.Commit={{.FullCommit}}"
+      - "-X seyir/internal/version.BuildDate={{.Date}}"
 
 archives:
   - id: seyir-archive
-    format: tar.gz
     files:
       - README*
       - LICENSE*
       - scripts/install.sh
+      - config/*
     name_template: >-
       {{ .ProjectName }}_
       {{- title .Os }}_
@@ -46,12 +56,72 @@ checksum:
 snapshot:
   version_template: "{{ incpatch .Version }}-next"
 
+# Docker images
+docker_manifests:
+  - name_template: "ghcr.io/semihy/seyir:latest"
+    image_templates:
+      - "ghcr.io/semihy/seyir:latest-amd64"
+      - "ghcr.io/semihy/seyir:latest-arm64"
+  - name_template: "ghcr.io/semihy/seyir:{{ .Tag }}"
+    image_templates:
+      - "ghcr.io/semihy/seyir:{{ .Tag }}-amd64"
+      - "ghcr.io/semihy/seyir:{{ .Tag }}-arm64"
+
+dockers:
+  - image_templates:
+      - "ghcr.io/semihy/seyir:latest-amd64"
+      - "ghcr.io/semihy/seyir:{{ .Tag }}-amd64"
+    dockerfile: Dockerfile
+    use: buildx
+    build_flag_templates:
+      - "--pull"
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.title={{.ProjectName}}"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.source={{.GitURL}}"
+    extra_files:
+      - docker-compose.yaml
+    goarch: amd64
+  - image_templates:
+      - "ghcr.io/semihy/seyir:latest-arm64"
+      - "ghcr.io/semihy/seyir:{{ .Tag }}-arm64"
+    dockerfile: Dockerfile
+    use: buildx
+    build_flag_templates:
+      - "--pull"
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.title={{.ProjectName}}"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.source={{.GitURL}}"
+    extra_files:
+      - docker-compose.yaml
+    goarch: arm64
+
 changelog:
   sort: asc
   filters:
     exclude:
       - '^docs:'
       - '^test:'
+      - '^ci:'
+      - '^chore:'
+      - '^style:'
+  groups:
+    - title: Features
+      regexp: "^.*feat[(\\w)]*:+.*$"
+      order: 0
+    - title: 'Bug fixes'
+      regexp: "^.*fix[(\\w)]*:+.*$"
+      order: 1
+    - title: 'Performance improvements'
+      regexp: "^.*perf[(\\w)]*:+.*$"
+      order: 2
+    - title: Others
+      order: 999
 
 release:
   github:
@@ -59,3 +129,40 @@ release:
     name: seyir
   draft: false
   prerelease: auto
+  name_template: "seyir {{.Version}}"
+  header: |
+    ## seyir {{.Version}} - Centralized Log Collector & Viewer
+    
+    ### Installation
+    
+    #### Quick Install (Linux/macOS)
+    ```bash
+    curl -L "https://github.com/SemihY/seyir/releases/download/{{.Tag}}/seyir_$(uname -s)_$(uname -m).tar.gz" | tar xz
+    sudo mv seyir /usr/local/bin/
+    ```
+    
+    #### Docker
+    ```bash
+    docker run -d \
+      -v /var/run/docker.sock:/var/run/docker.sock \
+      -v seyir-data:/app/data \
+      -p 5555:5555 \
+      ghcr.io/semihy/seyir:{{.Tag}}
+    ```
+    
+    #### Coolify
+    - Image: `ghcr.io/semihy/seyir:{{.Tag}}`
+    - Port: `5555:5555`
+    - Volumes: `/var/run/docker.sock:/var/run/docker.sock`
+    
+    ### Usage
+    ```bash
+    # Check version
+    seyir version
+    
+    # Start service (auto-discovers containers)
+    seyir service --port 5555
+    
+    # Pipe logs directly
+    docker logs mycontainer | seyir
+    ```
