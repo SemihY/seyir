@@ -321,12 +321,14 @@ func Query(filter *QueryFilter) (*QueryResult, error) {
 	// Build optimized parquet patterns using time-based Hive partitioning
 	parquetPatterns := buildTimeAwareParquetPatterns(lakeDir, filter.StartTime, filter.EndTime, filter.ProcessName)
 	
-	// Check if any files exist in the time range
+	// Check if any files exist in the time range and build list of existing patterns
 	var allMatches []string
+	var existingPatterns []string
 	for _, pattern := range parquetPatterns {
 		matches, err := filepath.Glob(pattern)
-		if err == nil {
+		if err == nil && len(matches) > 0 {
 			allMatches = append(allMatches, matches...)
+			existingPatterns = append(existingPatterns, pattern)
 		}
 	}
 	
@@ -339,18 +341,18 @@ func Query(filter *QueryFilter) (*QueryResult, error) {
 		}, nil
 	}
 	
-	debugLog("Query scanning %d parquet files across %d optimized time partitions", len(allMatches), len(parquetPatterns))
-	debugLog("Using Hive-aware patterns: %v", parquetPatterns)
+	debugLog("Query scanning %d parquet files across %d existing time partitions", len(allMatches), len(existingPatterns))
+	debugLog("Using existing patterns: %v", existingPatterns)
 	
 	// Build efficient SQL query with full-text search capabilities
-	// DuckDB supports array of patterns for read_parquet
+	// DuckDB supports array of patterns for read_parquet - only use patterns with existing files
 	var parquetPatternSQL string
-	if len(parquetPatterns) == 1 {
-		parquetPatternSQL = fmt.Sprintf("'%s'", parquetPatterns[0])
+	if len(existingPatterns) == 1 {
+		parquetPatternSQL = fmt.Sprintf("'%s'", existingPatterns[0])
 	} else {
 		// Use array syntax for multiple patterns: ['pattern1', 'pattern2', ...]
-		quotedPatterns := make([]string, len(parquetPatterns))
-		for i, pattern := range parquetPatterns {
+		quotedPatterns := make([]string, len(existingPatterns))
+		for i, pattern := range existingPatterns {
 			quotedPatterns[i] = fmt.Sprintf("'%s'", pattern)
 		}
 		parquetPatternSQL = fmt.Sprintf("[%s]", strings.Join(quotedPatterns, ", "))
@@ -504,12 +506,14 @@ func QueryCount(filter *QueryFilter) (int64, error) {
 	// Build time-aware parquet patterns
 	parquetPatterns := buildTimeAwareParquetPatterns(lakeDir, filter.StartTime, filter.EndTime, filter.ProcessName)
 	
-	// Check if any files exist
+	// Check if any files exist and build list of existing patterns
 	var allMatches []string
+	var existingPatterns []string
 	for _, pattern := range parquetPatterns {
 		matches, err := filepath.Glob(pattern)
-		if err == nil {
+		if err == nil && len(matches) > 0 {
 			allMatches = append(allMatches, matches...)
+			existingPatterns = append(existingPatterns, pattern)
 		}
 	}
 	
@@ -517,14 +521,14 @@ func QueryCount(filter *QueryFilter) (int64, error) {
 		return 0, nil
 	}
 	
-	// Build count SQL using the same pattern approach as Query
+	// Build count SQL using only existing patterns
 	var parquetPatternSQL string
-	if len(parquetPatterns) == 1 {
-		parquetPatternSQL = fmt.Sprintf("'%s'", parquetPatterns[0])
+	if len(existingPatterns) == 1 {
+		parquetPatternSQL = fmt.Sprintf("'%s'", existingPatterns[0])
 	} else {
 		// Use array syntax for multiple patterns: ['pattern1', 'pattern2', ...]
-		quotedPatterns := make([]string, len(parquetPatterns))
-		for i, pattern := range parquetPatterns {
+		quotedPatterns := make([]string, len(existingPatterns))
+		for i, pattern := range existingPatterns {
 			quotedPatterns[i] = fmt.Sprintf("'%s'", pattern)
 		}
 		parquetPatternSQL = fmt.Sprintf("[%s]", strings.Join(quotedPatterns, ", "))

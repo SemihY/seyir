@@ -936,10 +936,12 @@ func runSearchCommand(args []string) {
 	dataDir := getDataDir()
 	db.SetGlobalLakeDir(filepath.Join(dataDir, "lake"))
 
-	// Build query filter - default to last 24 hours if no time specified
+	// Build query filter - default to today if no time specified
 	now := time.Now()
+	// Start from beginning of today
+	startOfToday := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	filter := &db.QueryFilter{
-		StartTime: now.Add(-24 * time.Hour), // Default: last 24 hours
+		StartTime: startOfToday, // Default: from start of today
 		EndTime:   now,
 		Limit:     *limit,
 	}
