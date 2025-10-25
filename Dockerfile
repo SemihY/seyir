@@ -31,7 +31,7 @@ RUN CGO_ENABLED=1 \
         -X seyir/internal/version.Version=${VERSION} \
         -X seyir/internal/version.Commit=${COMMIT} \
         -X seyir/internal/version.BuildDate=${BUILD_DATE}" \
-    -o seyir ./cmd/seyir/main.go
+    -o seyir ./cmd/seyir
 
 FROM debian:bookworm-slim
 

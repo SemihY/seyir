@@ -12,12 +12,13 @@ before:
 
 builds:
   - id: seyir
-    main: ./cmd/seyir/main.go
+    main: ./cmd/seyir
     binary: seyir
     env:
       - CGO_ENABLED=1
     goos:
       - darwin
+      - linux
     goarch:
       - amd64
       - arm64

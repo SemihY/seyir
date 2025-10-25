@@ -13,6 +13,8 @@ Built for developers who want to **pipe**, **store**, and **search** logs locall
 ## ✨ Features
 
 * **Pipe anything** → View and search logs streamed via `stdin`
+* **Session management** → Group multiple processes into named sessions
+* **Interactive TUI** → Real-time log viewing with vim-style navigation
 * **Auto-discovery** → Detects Docker containers with `seyir.enable=true`
 * **DuckDB storage** → Fast search on compressed Parquet files
 * **Web UI** → Real-time viewing at `http://localhost:5555`
@@ -20,6 +22,67 @@ Built for developers who want to **pipe**, **store**, and **search** logs locall
 * **Compaction** → Automatic file merging for performance
 * **Retention** → Configurable cleanup by time or size
 * **Self-contained** → No database, no dependencies
+
+---
+
+## 🚀 Session Management
+
+Monitor multiple processes in a unified interface with Seyir's session management.
+
+![Seyir Demo](seyir-demo.gif)
+
+*Demo: Managing logs from 2 services in a single session with real-time TUI*
+
+Try it yourself:
+
+```bash
+# Run the demo
+./demo-simple.sh
+
+# Then open TUI to view the logs
+./seyir session start demo
+```
+
+### Real-World Example: E-commerce Microservices
+
+```bash
+# Attach your services (session will be created automatically)
+docker-compose logs -f gateway | seyir session attach ecommerce-app gateway &
+docker-compose logs -f product-svc | seyir session attach ecommerce-app product-svc &
+docker-compose logs -f postgres | seyir session attach ecommerce-app postgres &
+docker-compose logs -f redis | seyir session attach ecommerce-app redis &
+
+# Monitor everything in real-time TUI
+seyir session start ecommerce-app
+```
+
+**Benefits:**
+- 🔍 **Trace correlation** - Follow requests across all services
+- ⚡ **Real-time monitoring** - Live log streaming from all processes  
+- 🎯 **Smart filtering** - Quickly isolate errors, warnings, or specific traces
+- 🚀 **Developer-friendly** - Vim-style navigation and search
+
+### TUI Features
+
+- **Real-time log streaming** from all attached processes
+- **Vim-style navigation** (j/k, gg/G, Ctrl+U/D, PgUp/PgDn)
+- **Quick filtering** by log level (1=All, 2=Errors, 3=Warnings, 4=Traces)
+- **Search functionality** (press `/` to search)
+- **Message details** (press Enter to view full message)
+- **Trace ID grouping** - easily follow requests across services
+
+### Session Commands
+
+```bash
+# Session management
+seyir session list                       # List active sessions  
+seyir session start <name>               # Open TUI for session
+seyir session stop <name>                # Stop session
+seyir session cleanup                    # Remove inactive sessions
+
+# Process attachment (creates session automatically)
+seyir session attach <session> <process> # Attach logs via pipe
+```
 
 ---
 
@@ -41,9 +104,10 @@ seyir version
 
 ```bash
 docker run -d \
+  --platform linux/amd64 \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v seyir-data:/app/data \
-  -p 8080:8080 \
+  -p 5555:5555 \
   ghcr.io/semihy/seyir:latest
 ```
 
@@ -125,13 +189,14 @@ version: '3.8'
 services:
   seyir:
     image: 'ghcr.io/semihy/seyir:latest'
+    platform: linux/amd64
     ports:
-      - '9999:9999'
+      - '5555:5555'
     volumes:
       - '/var/run/docker.sock:/var/run/docker.sock'
       - 'seyir-data:/app/data'
     environment:
-      PORT: '${PORT:-9999}'
+      PORT: '${PORT:-5555}'
     restart: unless-stopped
 volumes:
   seyir-data:
