@@ -1,19 +1,3 @@
-FROM golang:1.24-bookworm AS builder
-
-RUN apt-get update && apt-get install -y \
-    gcc \
-    g++ \
-    && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /app
-
-COPY go.mod go.sum ./
-RUN go mod download
-
-COPY . .
-
-RUN CGO_ENABLED=1 go build -o seyir ./cmd/seyir
-
 FROM debian:bookworm-slim
 
 # Install runtime dependencies
@@ -30,8 +14,8 @@ RUN wget https://download.docker.com/linux/static/stable/$(uname -m)/docker-24.0
 
 WORKDIR /app
 
-# Copy the binary
-COPY --from=builder /app/seyir .
+# Copy the pre-built binary
+COPY seyir .
 
 # Create data directory
 RUN mkdir -p /app/data

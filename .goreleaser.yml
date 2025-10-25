@@ -50,24 +50,7 @@ checksum:
 snapshot:
   version_template: "{{ incpatch .Version }}-next"
 
-# Docker images - built on GitHub Actions Ubuntu runner
-dockers:
-  - image_templates:
-      - "ghcr.io/semihy/seyir:latest"
-      - "ghcr.io/semihy/seyir:{{ .Tag }}"
-      - "ghcr.io/semihy/seyir:v{{ .Major }}"
-      - "ghcr.io/semihy/seyir:v{{ .Major }}.{{ .Minor }}"
-    dockerfile: Dockerfile
-    build_flag_templates:
-      - "--pull"
-      - "--label=org.opencontainers.image.created={{.Date}}"
-      - "--label=org.opencontainers.image.title={{.ProjectName}}"
-      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
-      - "--label=org.opencontainers.image.version={{.Version}}"
-      - "--label=org.opencontainers.image.source={{.GitURL}}"
-    extra_files:
-      - docker-compose.yaml
-    skip_push: auto
+
 
 changelog:
   sort: asc
