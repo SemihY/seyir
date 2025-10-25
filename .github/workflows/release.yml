@@ -67,11 +67,18 @@ jobs:
             TAGS="$TAGS,ghcr.io/semihy/seyir:v$MAJOR,ghcr.io/semihy/seyir:v$MAJOR.$MINOR"
           fi
           
+          # Prepare tag args (robust handling)
+          TAG_ARGS=()
+          IFS=',' read -r -a arr <<< "$TAGS"
+          for t in "${arr[@]}"; do
+            TAG_ARGS+=(--tag "$t")
+          done
+
           # Build and push multi-platform images
           docker buildx build \
             --platform linux/amd64,linux/arm64 \
-            --tag $(echo $TAGS | tr ',' ' --tag ') \
-            --build-arg VERSION=$VERSION \
+            "${TAG_ARGS[@]}" \
+            --build-arg VERSION="$VERSION" \
             --build-arg COMMIT=${{ github.sha }} \
             --build-arg BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
             --push \
