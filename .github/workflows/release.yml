@@ -23,6 +23,11 @@ jobs:
         with:
           go-version: '1.24'
 
+      - name: Install cross-compilation toolchains
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-x86-64-linux-gnu g++-x86-64-linux-gnu gcc-mingw-w64 g++-mingw-w64
+
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:

@@ -17,16 +17,10 @@ builds:
     env:
       - CGO_ENABLED=1
     goos:
-      - linux
       - darwin
-      - windows
     goarch:
       - amd64
       - arm64
-    # Skip Windows ARM64 for now due to potential CGO issues with DuckDB
-    ignore:
-      - goos: windows
-        goarch: arm64
     # Inject version information at build time
     ldflags:
       - "-s -w"
@@ -56,26 +50,16 @@ checksum:
 snapshot:
   version_template: "{{ incpatch .Version }}-next"
 
-# Docker images
-docker_manifests:
-  - name_template: "ghcr.io/semihy/seyir:latest"
-    image_templates:
-      - "ghcr.io/semihy/seyir:latest-amd64"
-      - "ghcr.io/semihy/seyir:latest-arm64"
-  - name_template: "ghcr.io/semihy/seyir:{{ .Tag }}"
-    image_templates:
-      - "ghcr.io/semihy/seyir:{{ .Tag }}-amd64"
-      - "ghcr.io/semihy/seyir:{{ .Tag }}-arm64"
-
+# Docker images - built on GitHub Actions Ubuntu runner
 dockers:
   - image_templates:
-      - "ghcr.io/semihy/seyir:latest-amd64"
-      - "ghcr.io/semihy/seyir:{{ .Tag }}-amd64"
+      - "ghcr.io/semihy/seyir:latest"
+      - "ghcr.io/semihy/seyir:{{ .Tag }}"
+      - "ghcr.io/semihy/seyir:v{{ .Major }}"
+      - "ghcr.io/semihy/seyir:v{{ .Major }}.{{ .Minor }}"
     dockerfile: Dockerfile
-    use: buildx
     build_flag_templates:
       - "--pull"
-      - "--platform=linux/amd64"
       - "--label=org.opencontainers.image.created={{.Date}}"
       - "--label=org.opencontainers.image.title={{.ProjectName}}"
       - "--label=org.opencontainers.image.revision={{.FullCommit}}"
@@ -83,23 +67,7 @@ dockers:
       - "--label=org.opencontainers.image.source={{.GitURL}}"
     extra_files:
       - docker-compose.yaml
-    goarch: amd64
-  - image_templates:
-      - "ghcr.io/semihy/seyir:latest-arm64"
-      - "ghcr.io/semihy/seyir:{{ .Tag }}-arm64"
-    dockerfile: Dockerfile
-    use: buildx
-    build_flag_templates:
-      - "--pull"
-      - "--platform=linux/arm64"
-      - "--label=org.opencontainers.image.created={{.Date}}"
-      - "--label=org.opencontainers.image.title={{.ProjectName}}"
-      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
-      - "--label=org.opencontainers.image.version={{.Version}}"
-      - "--label=org.opencontainers.image.source={{.GitURL}}"
-    extra_files:
-      - docker-compose.yaml
-    goarch: arm64
+    skip_push: auto
 
 changelog:
   sort: asc
