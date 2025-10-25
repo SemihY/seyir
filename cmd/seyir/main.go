@@ -42,8 +42,7 @@ Commands:
     service     Start log collection service (Docker containers + Web UI)
     web         Start web server only 
     search      Search logs with filters (DuckDB-powered)
-    sessions    Show active log sessions
-    cleanup     Clean up old log sessions
+    session     Start and manage interactive log sessions with TUI
     batch       Manage batch buffer settings and statistics
     version     Show version information
     help        Show this help
@@ -68,8 +67,12 @@ Examples:
     docker logs mycontainer | seyir
     kubectl logs -f deployment/api | seyir
 
-    # Management
-    seyir sessions
+    # Session management
+    seyir session start myproject
+    seyir session list
+    seyir session cleanup
+
+    # Batch management
     seyir batch stats
     seyir batch config set flush_interval 3
 
@@ -77,7 +80,6 @@ Container Setup:
     # Containers opt-in to tracking with labels:
     docker run -l seyir.enable=true my-app
     docker run -l seyir.enable=true -l seyir.project=web -l seyir.component=api backend-service
-    seyir cleanup
 
 Docker Deployment:
     docker run -d \\
@@ -159,16 +161,14 @@ func main() {
 		runQueryCommand(args[1:])
 	case "stats":
 		runQueryStats()
-	case "sessions":
-		runShowSessions()
-	case "cleanup":
-		runCleanupSessions()
 	case "batch":
 		if len(args) < 2 {
 			runBatchUsage()
 			os.Exit(1)
 		}
 		runBatchCommand(args[1:])
+	case "session":
+		runSessionCommand(args[1:])
 	case "version":
 		fmt.Println(version.Get().String())
 	case "help", "--help", "-h":
@@ -241,42 +241,23 @@ func runPipeMode() {
 	logger.Info("Pipe operation completed")
 }
 
-// runShowSessions displays information about active sessions
-func runShowSessions() {
-	sessions := db.GetActiveSessions()
-	
-	if len(sessions) == 0 {
-		fmt.Println("No active sessions found.")
-		return
-	}
-	
-	fmt.Printf("Active Sessions (%d):\n", len(sessions))
-	fmt.Printf("%-25s %-20s %-20s %s\n", "SESSION ID", "CREATED", "LAST ACTIVITY", "PROCESS")
-	fmt.Printf("%s\n", strings.Repeat("-", 100))
-	
-	for _, session := range sessions {
-		createdStr := session.CreatedAt.Format("15:04:05")
-		activityStr := session.LastActivity.Format("15:04:05")
-		
-		fmt.Printf("%-25s %-20s %-20s %s\n", 
-			session.SessionID, createdStr, activityStr, session.ProcessInfo)
-	}
-}
 
-// runCleanupSessions removes inactive sessions
-func runCleanupSessions() {
+// runSessionCleanup removes inactive sessions
+func runSessionCleanup() {
+	sessionManager := GetSessionManager()
+	
 	// Clean up sessions inactive for more than 5 minutes
-	cleaned := db.CleanupInactiveSessions(5 * time.Minute)
+	cleaned := sessionManager.CleanupInactiveSessions(5 * time.Minute)
 	
 	if cleaned > 0 {
-		fmt.Printf("Cleaned up %d inactive sessions.\n", cleaned)
+		fmt.Printf("🧹 Cleaned up %d inactive sessions.\n", cleaned)
 	} else {
-		fmt.Println("No inactive sessions to clean up.")
+		fmt.Println("✨ No inactive sessions to clean up.")
 	}
 	
 	// Show remaining active sessions
-	sessions := db.GetActiveSessions()
-	fmt.Printf("Active sessions remaining: %d\n", len(sessions))
+	sessions := sessionManager.GetActiveSessions()
+	fmt.Printf("📊 Active sessions remaining: %d\n", len(sessions))
 }
 
 // runWebServer starts the web server for log viewing
@@ -1040,3 +1021,221 @@ func runSearchCommand(args []string) {
 	fmt.Println(strings.Repeat("-", 120))
 	fmt.Printf("Total: %d entries\n", len(results))
 }
+
+// Session command functions
+func runSessionUsage() {
+	fmt.Println(`seyir session - Interactive log sessions with TUI
+
+Usage:
+    seyir session <command> [options]
+
+Commands:
+    start <session-name>              Start a new session with TUI interface
+    attach <session-name> <process>   Attach a process to existing session (use with pipe)
+    list                              List active sessions
+    stop <session-name>               Stop a session
+    cleanup                           Clean up inactive sessions
+
+Examples:
+    # Start a new session (opens TUI)
+    seyir session start myproject
+
+    # In another terminal, attach processes
+    docker-compose logs -f api | seyir session attach myproject api
+    docker-compose logs -f db  | seyir session attach myproject db
+    
+    # List active sessions
+    seyir session list
+    
+    # Stop a session
+    seyir session stop myproject
+    
+    # Clean up inactive sessions
+    seyir session cleanup
+
+Session Features:
+    - Multiple processes per session
+    - Real-time TUI with filtering
+    - Auto-refresh every 3 seconds
+    - View modes: all logs, errors, warnings, traces
+    - Persistent session state`)
+}
+
+func runSessionCommand(args []string) {
+	if len(args) == 0 {
+		runSessionUsage()
+		return
+	}
+
+	command := args[0]
+
+	switch command {
+	case "start":
+		runSessionStart(args[1:])
+	case "attach":
+		runSessionAttach(args[1:])
+	case "list":
+		runSessionList()
+	case "stop":
+		runSessionStop(args[1:])
+	case "cleanup":
+		runSessionCleanup()
+	default:
+		fmt.Printf("Unknown session command: %s\n", command)
+		runSessionUsage()
+		os.Exit(1)
+	}
+}
+
+func runSessionStart(args []string) {
+	sessionName := "default"
+	if len(args) > 0 {
+		sessionName = args[0]
+	}
+
+	// Initialize lake directory for querying
+	dataDir := getDataDir()
+	db.SetGlobalLakeDir(filepath.Join(dataDir, "lake"))
+
+	// Create or get existing session
+	sessionManager := GetSessionManager()
+	session := sessionManager.CreateSession(sessionName)
+
+	fmt.Printf("🚀 Started session: %s (ID: %s)\n", sessionName, session.ID)
+	fmt.Printf("📎 Attach processes with:\n")
+	fmt.Printf("   docker logs -f <container> | seyir session attach %s <process-name>\n", sessionName)
+	fmt.Printf("   kubectl logs -f pod/app | seyir session attach %s app\n", sessionName)
+	fmt.Printf("\n⚡ Starting TUI interface...\n\n")
+
+	// Start TUI
+	if err := StartTUI(session); err != nil {
+		fmt.Printf("❌ TUI failed: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func runSessionAttach(args []string) {
+	if len(args) < 2 {
+		fmt.Println("Usage: seyir session attach <session-name> <process-name>")
+		fmt.Println("Example: docker logs -f api | seyir session attach myproject api")
+		os.Exit(1)
+	}
+
+	sessionName := args[0]
+	processName := args[1]
+
+	// Get or create session
+	sessionManager := GetSessionManager()
+	session, exists := sessionManager.GetSessionByName(sessionName)
+	if !exists {
+		// Create new session if it doesn't exist
+		session = sessionManager.CreateSession(sessionName)
+		fmt.Printf("📝 Created new session: %s\n", sessionName)
+	}
+
+	// Attach process to session
+	session.AttachProcess(processName)
+	fmt.Printf("📎 Attached process '%s' to session '%s'\n", processName, sessionName)
+	fmt.Printf("💡 View logs with: seyir session start %s\n", sessionName)
+
+	// Use the same collector infrastructure as pipe mode
+	logger.Info("Starting session attach with collector infrastructure")
+
+	collectorManager := collector.NewManager()
+
+	// Enable stdin collector with the process name as source
+	if err := collectorManager.EnableStdin(processName); err != nil {
+		fmt.Printf("❌ Failed to enable stdin collector: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Handle signals for graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGPIPE)
+
+	// Wait for the collector to finish naturally or for a signal
+	done := make(chan bool, 1)
+	go func() {
+		// Monitor the stdin collector until it's no longer healthy (finished)
+		for {
+			time.Sleep(100 * time.Millisecond)
+			stdinCollector, exists := collectorManager.GetCollector("stdin")
+			if !exists {
+				done <- true
+				return
+			}
+			if !stdinCollector.IsHealthy() {
+				done <- true
+				return
+			}
+		}
+	}()
+
+	// Wait for either completion or signal
+	select {
+	case <-sigChan:
+		logger.Info("Received signal, shutting down session attach")
+	case <-done:
+		logger.Info("Session attach stdin collection completed")
+	}
+
+	// Stop collectors and cleanup
+	collectorManager.StopAll()
+	
+	// Cleanup ultra-light loggers
+	db.CleanupUltraLightLoggers()
+	
+	fmt.Printf("✅ Finished processing logs for process '%s' in session '%s'\n", processName, sessionName)
+}
+
+func runSessionList() {
+	sessionManager := GetSessionManager()
+	sessions := sessionManager.GetActiveSessions()
+
+	if len(sessions) == 0 {
+		fmt.Println("No active sessions found.")
+		return
+	}
+
+	fmt.Printf("Active Sessions (%d):\n\n", len(sessions))
+	fmt.Printf("%-20s %-12s %-10s %-8s %-10s %s\n", 
+		"NAME", "ID", "DURATION", "PROCESSES", "LOGS", "LAST UPDATE")
+	fmt.Printf("%s\n", strings.Repeat("-", 80))
+
+	for _, session := range sessions {
+		stats := session.GetStats()
+		duration := formatDuration(stats.Duration)
+		lastUpdate := session.LastUpdate.Format("15:04:05")
+
+		fmt.Printf("%-20s %-12s %-10s %-8d %-10d %s\n",
+			session.Name,
+			session.ID[:8]+"...",
+			duration,
+			stats.ProcessCount,
+			stats.TotalLogs,
+			lastUpdate)
+	}
+	
+	fmt.Printf("\nUse 'seyir session start <name>' to view a session's logs in TUI.\n")
+}
+
+func runSessionStop(args []string) {
+	if len(args) == 0 {
+		fmt.Println("Usage: seyir session stop <session-name>")
+		os.Exit(1)
+	}
+
+	sessionName := args[0]
+	sessionManager := GetSessionManager()
+	
+	session, exists := sessionManager.GetSessionByName(sessionName)
+	if !exists {
+		fmt.Printf("❌ Session '%s' not found\n", sessionName)
+		os.Exit(1)
+	}
+
+	session.Stop()
+	fmt.Printf("🛑 Stopped session: %s\n", sessionName)
+}
+
+

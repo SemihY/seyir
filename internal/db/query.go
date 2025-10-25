@@ -150,11 +150,13 @@ func GetDistinctValues(column string, limit int) ([]string, error) {
 	
 	var values []string
 	for rows.Next() {
-		var value string
+		var value *string
 		if err := rows.Scan(&value); err != nil {
 			continue
 		}
-		values = append(values, value)
+		if value != nil && *value != "" {
+			values = append(values, *value)
+		}
 	}
 	
 	return values, nil
@@ -361,10 +363,10 @@ func Query(filter *QueryFilter) (*QueryResult, error) {
 	baseSQL := fmt.Sprintf(`
 		SELECT ts, level, message, 
 		       COALESCE(trace_id, '') as trace_id,
-		       source, 
-		       tags,
-		       id,
-		       process
+		       COALESCE(source, '') as source, 
+		       COALESCE(tags, '') as tags,
+		       COALESCE(id, '') as id,
+		       COALESCE(process, '') as process
 		FROM read_parquet(%s)`, parquetPatternSQL)
 	
 	// Build WHERE clause with comprehensive filters
@@ -450,22 +452,25 @@ func Query(filter *QueryFilter) (*QueryResult, error) {
 	var entries []*LogEntry
 	for rows.Next() {
 		var e LogEntry
-		var tagsStr sql.NullString
-		var processStr sql.NullString
+		var tagsStr string
+		var processStr string
+		var idStr string
+		var traceIDStr string
 		
-		err := rows.Scan(&e.Ts, &e.Level, &e.Message, &e.TraceID, &e.Source, &tagsStr, &e.ID, &processStr)
+		// Scan in the same order as SQL SELECT: ts, level, message, trace_id, source, tags, id, process
+		err := rows.Scan(&e.Ts, &e.Level, &e.Message, &traceIDStr, &e.Source, &tagsStr, &idStr, &processStr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan result: %v", err)
 		}
 		
-		// Set process if available
-		if processStr.Valid {
-			e.Process = processStr.String
-		}
+		// Set fields (COALESCE ensures no NULL values)
+		e.ID = idStr
+		e.TraceID = traceIDStr
+		e.Process = processStr
 		
 		// Convert tags from comma-separated string back to array
-		if tagsStr.Valid && tagsStr.String != "" {
-			e.Tags = strings.Split(tagsStr.String, ",")
+		if tagsStr != "" {
+			e.Tags = strings.Split(tagsStr, ",")
 			for i := range e.Tags {
 				e.Tags[i] = strings.TrimSpace(e.Tags[i])
 			}
