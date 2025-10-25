@@ -1,6 +1,6 @@
 ARG TARGETOS TARGETARCH
 
-FROM --platform=$BUILDPLATFORM golang:1.22-bookworm AS builder
+FROM --platform=$BUILDPLATFORM golang:1.23-bookworm AS builder
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
@@ -10,6 +10,9 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
+# Set GOTOOLCHAIN to auto to allow downloading Go 1.24
+ENV GOTOOLCHAIN=auto
+
 # Copy dependency files
 COPY go.mod go.sum ./
 RUN go mod download
@@ -18,12 +21,11 @@ RUN go mod download
 COPY . .
 
 # Build the binary for target platform
-ARG TARGETOS TARGETARCH
 ARG VERSION="dev"
 ARG COMMIT="unknown"
 ARG BUILD_DATE="unknown"
 
-RUN CGO_ENABLED=1 GOOS=$TARGETOS GOARCH=$TARGETARCH \
+RUN CGO_ENABLED=1 \
     go build -ldflags "\
         -s -w \
         -X seyir/internal/version.Version=${VERSION} \
