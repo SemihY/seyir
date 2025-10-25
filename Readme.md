@@ -118,114 +118,25 @@ seyir service restart
 ```
 
 
-## 🐳 Coolify Deployment
-
-Deploy Seyir as a self-hosted log collector on [Coolify](https://coolify.io/) with zero configuration:
-
-### Quick Setup
-
-1. **Create New Resource** → **Docker Service**
-2. **Image:** `ghcr.io/semihy/seyir:latest`
-3. **Port:** `5555:5555`
-4. **Deploy** ✅
-
-### Detailed Configuration
-
-**Docker Image Settings:**
-```
-Image: ghcr.io/semihy/seyir:latest
-Tag: latest (or specific version like v1.0.0)
-```
-
-**Port Mapping:**
-```
-Internal Port: 5555
-External Port: 5555 (or your preferred port)
-```
-
-**Volume Mappings:**
-```bash
-# Docker socket for container discovery
-/var/run/docker.sock → /var/run/docker.sock (bind mount)
-
-# Persistent log storage
-seyir-data → /app/data (named volume)
-```
-
-**Environment Variables:**
-```bash
-PORT=5555                    # Web server port
-```
-
-### Container Auto-Discovery
-
-Once deployed, Seyir automatically discovers Docker containers. To make your containers visible in Seyir, add labels:
+## 🐳 Coolify
 
 ```yaml
-# In your docker-compose.yml or Coolify service
+version: '3.8'
 services:
-  your-app:
-    image: your-app:latest
-    labels:
-      - "seyir.enable=true"
-      - "seyir.name=My Application"
-      - "seyir.description=Production API service"
-      - "seyir.env=production"
-```
-
-### Access & Usage
-
-After deployment:
-- **Web UI:** `https://your-domain.com` (via Coolify proxy)
-- **Direct Access:** `http://server-ip:5555`
-
-### Version Updates
-
-To update Seyir in Coolify:
-
-1. **Auto-update:** Enable auto-deploy for `latest` tag
-2. **Manual:** Change image tag to specific version: `ghcr.io/semihy/seyir:v1.2.0`
-3. **Redeploy** the service
-
-### Backup & Persistence
-
-Seyir stores logs in `/app/data` - ensure this volume is backed up:
-
-### Troubleshooting
-
-**Can't see containers:**
-- Ensure `/var/run/docker.sock` is mounted
-- Add `seyir.enable=true` label to containers
-- Check Seyir logs for discovery errors
-
-**Performance issues:**
-- Increase volume size for log storage
-- Configure log retention in Seyir settings
-- Monitor disk usage in Coolify
-
-### Example Coolify Configuration
-
-**Service Configuration:**
-```yaml
-# Coolify Docker Service Settings
-name: seyir
-image: ghcr.io/semihy/seyir:latest
-ports:
-  - "5555:5555"
+  seyir:
+    image: 'ghcr.io/semihy/seyir:latest'
+    ports:
+      - '9999:9999'
+    volumes:
+      - '/var/run/docker.sock:/var/run/docker.sock'
+      - 'seyir-data:/app/data'
+    environment:
+      PORT: '${PORT:-9999}'
+    restart: unless-stopped
 volumes:
-  - "/var/run/docker.sock:/var/run/docker.sock"
-  - "seyir-data:/app/data"
-environment:
-  PORT: "5555"
-restart: unless-stopped
+  seyir-data:
+    driver: local
 ```
-
-**Domain & SSL:**
-- Enable Coolify's automatic SSL
-- Set custom domain: `logs.yourdomain.com`
-- Configure basic auth if needed for security
-
-Once deployed, you can view logs from all your Coolify services in one centralized location! 🚀
 
 ---
 

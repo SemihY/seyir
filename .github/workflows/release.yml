@@ -21,7 +21,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.22'
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
@@ -43,7 +43,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.22'
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -55,25 +55,24 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build Docker image manually
+      - name: Build and push multi-platform Docker images
         run: |
-          # Build the Linux binary for Docker
-          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -ldflags "-s -w -X seyir/internal/version.Version=${{ github.ref_name }} -X seyir/internal/version.Commit=${{ github.sha }} -X seyir/internal/version.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o seyir ./cmd/seyir/main.go
-          
-          # Build and push Docker images
-          docker build -t ghcr.io/semihy/seyir:latest .
-          docker tag ghcr.io/semihy/seyir:latest ghcr.io/semihy/seyir:${{ github.ref_name }}
-          
-          # Extract version parts for additional tags
+          # Extract version parts for tagging
           VERSION=${{ github.ref_name }}
+          TAGS="ghcr.io/semihy/seyir:latest,ghcr.io/semihy/seyir:$VERSION"
+          
           if [[ $VERSION =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
             MAJOR=${BASH_REMATCH[1]}
             MINOR=${BASH_REMATCH[2]}
-            docker tag ghcr.io/semihy/seyir:latest ghcr.io/semihy/seyir:v$MAJOR
-            docker tag ghcr.io/semihy/seyir:latest ghcr.io/semihy/seyir:v$MAJOR.$MINOR
-            docker push ghcr.io/semihy/seyir:v$MAJOR
-            docker push ghcr.io/semihy/seyir:v$MAJOR.$MINOR
+            TAGS="$TAGS,ghcr.io/semihy/seyir:v$MAJOR,ghcr.io/semihy/seyir:v$MAJOR.$MINOR"
           fi
           
-          docker push ghcr.io/semihy/seyir:latest
-          docker push ghcr.io/semihy/seyir:${{ github.ref_name }}
+          # Build and push multi-platform images
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --tag $(echo $TAGS | tr ',' ' --tag ') \
+            --build-arg VERSION=$VERSION \
+            --build-arg COMMIT=${{ github.sha }} \
+            --build-arg BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+            --push \
+            .
