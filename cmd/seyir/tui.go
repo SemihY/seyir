@@ -178,29 +178,47 @@ type logsRefreshedMsg struct {
 
 // Styles
 var (
+	// Primary colors
+	primaryColor     = lipgloss.Color("#7C3AED")  // Purple
+	secondaryColor   = lipgloss.Color("#10B981")  // Green  
+	accentColor      = lipgloss.Color("#F59E0B")  // Amber
+	errorColor       = lipgloss.Color("#EF4444")  // Red
+	warningColor     = lipgloss.Color("#F97316")  // Orange
+	mutedColor       = lipgloss.Color("#6B7280")  // Gray
+	brightColor      = lipgloss.Color("#F3F4F6")  // Light gray
+	
+	// Styles
 	headerStyle = lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("205")).
+		Foreground(primaryColor).
+		Background(lipgloss.Color("#1F2937")).
+		Padding(0, 1).
 		MarginBottom(1)
 
 	sessionInfoStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("241")).
+		Foreground(secondaryColor).
 		MarginBottom(1)
 
 	statusStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("244")).
+		Foreground(mutedColor).
+		Background(lipgloss.Color("#111827")).
+		Padding(0, 1).
 		MarginBottom(1)
 
 	errorStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("196"))
+		Foreground(errorColor).
+		Bold(true)
 
 	helpStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("244")).
+		Foreground(mutedColor).
+		Background(lipgloss.Color("#1F2937")).
+		Padding(0, 1).
 		MarginTop(1)
 
 	selectedRowStyle = lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("212"))
+		Foreground(brightColor).
+		Background(primaryColor)
 )
 
 // InitialTUIModel creates the initial TUI model
@@ -220,16 +238,21 @@ func InitialTUIModel(session *Session) TUIModel {
 		table.WithHeight(20),
 	)
 
+	// Modern table styling inspired by lazygit
 	s := table.DefaultStyles()
 	s.Header = s.Header.
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("240")).
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(primaryColor).
 		BorderBottom(true).
-		Bold(false)
+		Bold(true).
+		Foreground(brightColor).
+		Background(lipgloss.Color("#1F2937"))
 	s.Selected = s.Selected.
-		Foreground(lipgloss.Color("229")).
-		Background(lipgloss.Color("57")).
-		Bold(false)
+		Foreground(brightColor).
+		Background(primaryColor).
+		Bold(true)
+	s.Cell = s.Cell.
+		Foreground(lipgloss.Color("#E5E7EB"))
 	t.SetStyles(s)
 
 	// Initialize text input for search
@@ -314,7 +337,12 @@ func (m TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Update table only in list view
 	if m.uiState == StateList {
-		m.table, cmd = m.table.Update(msg)
+		switch msg.(type) {
+		case tea.KeyMsg:
+			// Skip key messages - we handle them manually
+		default:
+			m.table, cmd = m.table.Update(msg)
+		}
 	}
 	
 	return m, cmd
@@ -669,26 +697,34 @@ func (m TUIModel) listView() string {
 	b.WriteString(sessionInfoStyle.Render(sessionInfo))
 	b.WriteString("\n")
 
-	// Current view and status with pagination
+	// Current view and status with enhanced pagination info
 	loadingIndicator := ""
 	if m.loading {
-		loadingIndicator = " ⟳"
+		loadingIndicator = " ⟳ Loading..."
 	}
 	
 	searchInfo := ""
 	if m.searchQuery != "" {
-		searchInfo = fmt.Sprintf(" | Search: \"%s\"", m.searchQuery)
+		searchInfo = fmt.Sprintf(" | 🔍 \"%s\"", m.searchQuery)
 	}
 	
+	// Enhanced pagination info with cursor position
 	pageInfo := ""
+	cursor := m.table.Cursor()
+	currentLogs := m.getCurrentPageLogs()
 	if m.totalPages > 1 {
-		pageInfo = fmt.Sprintf(" | Page: %d/%d", m.currentPage+1, m.totalPages)
+		totalFiltered := len(m.filteredLogs)
+		globalPos := m.currentPage*m.itemsPerPage + cursor + 1
+		pageInfo = fmt.Sprintf(" | Page %d/%d (%d/%d entries)", 
+			m.currentPage+1, m.totalPages, globalPos, totalFiltered)
+	} else if len(currentLogs) > 0 {
+		pageInfo = fmt.Sprintf(" | Entry %d/%d", cursor+1, len(currentLogs))
 	}
 	
-	status := fmt.Sprintf("View: %s | Total: %d | Showing: %d%s%s | Last Update: %s%s",
+	status := fmt.Sprintf("View: %s | Total: %d | Filtered: %d%s%s | Updated: %s%s",
 		m.viewMode.String(),
 		len(m.logs),
-		len(m.getCurrentPageLogs()),
+		len(m.filteredLogs),
 		searchInfo,
 		pageInfo,
 		m.lastUpdate.Format("15:04:05"),
@@ -698,7 +734,7 @@ func (m TUIModel) listView() string {
 
 	// Error display
 	if m.error != nil {
-		b.WriteString(errorStyle.Render(fmt.Sprintf("Error: %v", m.error)))
+		b.WriteString(errorStyle.Render(fmt.Sprintf("❌ Error: %v", m.error)))
 		b.WriteString("\n")
 	}
 
@@ -706,13 +742,35 @@ func (m TUIModel) listView() string {
 	b.WriteString(m.table.View())
 	b.WriteString("\n")
 
-	// Help
+	// Lazygit-style bottom status bar
 	if m.showHelp {
 		help := m.helpView()
 		b.WriteString(helpStyle.Render(help))
 	} else {
-		shortHelp := "[1-4] Filters [/] Search [Enter] View [↑↓] Navigate [PgUp/PgDn] Pages [?] Help [q] Quit"
-		b.WriteString(helpStyle.Render(shortHelp))
+		// Build context-sensitive shortcuts
+		shortcuts := []string{}
+		
+		// Navigation shortcuts
+		if len(currentLogs) > 0 {
+			shortcuts = append(shortcuts, "↑↓/jk:navigate")
+			shortcuts = append(shortcuts, "enter:details")
+		}
+		
+		// Pagination shortcuts  
+		if m.totalPages > 1 {
+			shortcuts = append(shortcuts, "pgup/pgdn:pages")
+			shortcuts = append(shortcuts, "g/G:first/last")
+		}
+		
+		// Filter shortcuts
+		shortcuts = append(shortcuts, "1-4:filters")
+		shortcuts = append(shortcuts, "/:search")
+		shortcuts = append(shortcuts, "r:refresh")
+		shortcuts = append(shortcuts, "?:help")
+		shortcuts = append(shortcuts, "q:quit")
+		
+		bottomBar := fmt.Sprintf("│ %s │", strings.Join(shortcuts, " │ "))
+		b.WriteString(helpStyle.Render(bottomBar))
 	}
 
 	return b.String()
@@ -816,27 +874,42 @@ func (m TUIModel) detailView() string {
 
 // helpView returns the detailed help text
 func (m TUIModel) helpView() string {
-	return `
-Navigation:
-  ↑/↓ or k/j - Move up/down     PgUp/PgDn - Page up/down
-  Home/g - First page           End/G - Last page
-  Enter/Space - View message    Esc - Back to list
-
-Filtering:
-  1 - Show all logs            2 - Show errors only  
-  3 - Show warnings            4 - Show logs with traces
-  / - Search/filter logs       Ctrl+C - Clear search
-
-Actions:
-  r - Manual refresh           ? - Toggle this help
-  q - Quit application
-
-Features:
-  • Auto-refresh: Every 3 seconds  • Time range: Last 1 hour
-  • Pagination: Navigate large log sets efficiently
-  • Live search: Filter logs as you type
-  • Full message view: Press Enter on any log entry
-`
+	helpSections := []string{
+		"┌─ Navigation ─────────────────────────────────────────────────────────────┐",
+		"│ ↑/↓, j/k          Move cursor up/down                                   │",
+		"│ PgUp/PgDn         Navigate pages (Ctrl+U/Ctrl+D)                       │", 
+		"│ Home/g            Jump to first page                                    │",
+		"│ End/G             Jump to last page                                     │",
+		"│ Enter/Space       View full log message details                        │",
+		"│ Esc/Backspace     Return to previous view                              │",
+		"└─────────────────────────────────────────────────────────────────────────┘",
+		"",
+		"┌─ Filtering & Search ─────────────────────────────────────────────────────┐",
+		"│ 1, a              Show all logs                                         │",
+		"│ 2, e              Show errors only (ERROR, FATAL)                      │",
+		"│ 3, w              Show warnings and errors                             │", 
+		"│ 4, t              Show logs with trace IDs                             │",
+		"│ /, Ctrl+F         Open search/filter interface                         │",
+		"│ Ctrl+L            Clear current search                                 │",
+		"└─────────────────────────────────────────────────────────────────────────┘",
+		"",
+		"┌─ Actions ────────────────────────────────────────────────────────────────┐",
+		"│ r, F5, Ctrl+R    Manual refresh (auto-refresh: 3s)                     │",
+		"│ ?, h, F1          Toggle this help panel                               │",
+		"│ q, Ctrl+C         Quit application                                     │",
+		"└─────────────────────────────────────────────────────────────────────────┘",
+		"",
+		"┌─ Features ───────────────────────────────────────────────────────────────┐",
+		"│ • Real-time log monitoring with auto-refresh every 3 seconds           │",
+		"│ • Efficient pagination for large log datasets                          │", 
+		"│ • Live search with instant filtering across all log fields             │",
+		"│ • Full message view with scrollable content                            │",
+		"│ • Session-based multi-process log aggregation                          │",
+		"│ • Time range: Last 1 hour | Storage: Parquet + DuckDB                 │",
+		"└─────────────────────────────────────────────────────────────────────────┘",
+	}
+	
+	return strings.Join(helpSections, "\n")
 }
 
 // Helper functions for pagination and search
