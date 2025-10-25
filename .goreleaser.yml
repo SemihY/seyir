@@ -105,8 +105,7 @@ release:
     
     #### Quick Install (Linux/macOS)
     ```bash
-    curl -L "https://github.com/SemihY/seyir/releases/download/{{.Tag}}/seyir_$(uname -s)_$(uname -m).tar.gz" | tar xz
-    sudo mv seyir /usr/local/bin/
+    curl -fsSL https://semihy.github.io/seyir/scripts/install.sh | bash
     ```
     
     #### Docker

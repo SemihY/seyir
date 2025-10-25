@@ -31,8 +31,7 @@ Built for developers who want to **pipe**, **store**, and **search** logs locall
 
 ```bash
 # Latest version
-curl -L "https://github.com/SemihY/seyir/releases/latest/download/seyir_$(uname -s)_$(uname -m).tar.gz" | tar xz
-sudo mv seyir /usr/local/bin/
+curl -fsSL https://semihy.github.io/seyir/scripts/install.sh | bash
 
 # Verify installation
 seyir version

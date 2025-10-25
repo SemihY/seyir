@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   goreleaser:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -22,11 +22,6 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.24'
-
-      - name: Install cross-compilation toolchains
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-x86-64-linux-gnu g++-x86-64-linux-gnu gcc-mingw-w64 g++-mingw-w64
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
